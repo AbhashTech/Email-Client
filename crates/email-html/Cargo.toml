@@ -1,0 +1,8 @@
+[package]
+name = "email-html"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+html-escape = { workspace = true }
+regex = { workspace = true }

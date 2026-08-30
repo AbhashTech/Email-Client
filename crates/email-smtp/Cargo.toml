@@ -1,0 +1,13 @@
+[package]
+name = "email-smtp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+email-core = { workspace = true }
+email-html = { workspace = true }
+lettre = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }

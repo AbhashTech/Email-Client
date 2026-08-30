@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/email-core",
+    "crates/email-keychain",
+    "crates/email-storage",
+    "crates/email-sync",
+    "crates/email-smtp",
+    "crates/email-html",
+    "crates/email-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Email Client Team"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+email-core = { path = "crates/email-core" }
+email-keychain = { path = "crates/email-keychain" }
+email-storage = { path = "crates/email-storage" }
+email-sync = { path = "crates/email-sync" }
+email-smtp = { path = "crates/email-smtp" }
+email-html = { path = "crates/email-html" }
+
+tokio = { version = "1.40", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"
+async-trait = "0.1"
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+keyring = { version = "3.0", features = ["sync-secret-service"] }
+mailparse = "0.15"
+async-imap = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["ring"] }
+webpki-roots = "0.26"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport", "pool"] }
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.29"
+egui_extras = { version = "0.29", features = ["image"] }
+ksni = { version = "0.3", default-features = false, features = ["tokio"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+html-escape = "0.2"
+regex = "1.10"
+futures = "0.3"

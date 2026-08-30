@@ -1,0 +1,25 @@
+[package]
+name = "email-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+email-core = { workspace = true }
+email-keychain = { workspace = true }
+email-storage = { workspace = true }
+email-sync = { workspace = true }
+email-smtp = { workspace = true }
+email-html = { workspace = true }
+
+eframe = { workspace = true }
+egui = { workspace = true }
+egui_extras = { workspace = true }
+ksni = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+uuid = { workspace = true }
+r2d2 = { workspace = true }
+image = { workspace = true }
+rustls = { workspace = true }

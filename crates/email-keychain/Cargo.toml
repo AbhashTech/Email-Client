@@ -1,0 +1,10 @@
+[package]
+name = "email-keychain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+email-core = { workspace = true }
+keyring = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
