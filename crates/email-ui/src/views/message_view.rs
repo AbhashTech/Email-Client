@@ -283,27 +283,35 @@ impl MessageViewPane {
 
             // 6. Attachments Card Section
             if !detail.attachments.is_empty() {
-                ui.add_space(24.0);
+                ui.add_space(28.0);
                 ui.painter().hline(
                     ui.available_rect_before_wrap().x_range(),
                     ui.cursor().top(),
                     Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
                 );
-                ui.add_space(12.0);
+                ui.add_space(16.0);
 
                 ui.label(
                     RichText::new(format!("📎 ATTACHMENTS ({}) — Click to Save to Downloads", detail.attachments.len()))
-                        .size(11.0)
+                        .size(11.5)
                         .strong()
                         .color(AppTheme::TEXT_MUTED),
                 );
-                ui.add_space(10.0);
+                ui.add_space(14.0);
 
                 ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 14.0);
+
                     for att in &detail.attachments {
                         let size_kb = att.size_bytes / 1024;
+                        let size_text = if size_kb > 1024 {
+                            format!("{:.1} MB", size_kb as f64 / 1024.0)
+                        } else {
+                            format!("{} KB", size_kb)
+                        };
+
                         let (rect, resp) = ui.allocate_exact_size(
-                            Vec2::new(240.0, 56.0),
+                            Vec2::new(250.0, 60.0),
                             Sense::click(),
                         );
 
@@ -326,16 +334,22 @@ impl MessageViewPane {
                         } else {
                             AppTheme::BG_CARD
                         };
-                        ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
-                        ui.painter().rect_stroke(rect, Rounding::same(6.0), Stroke::new(1.0_f32, if resp.hovered() { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE }));
 
-                        let mut pill_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                        pill_ui.horizontal(|ui| {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("📄").size(18.0));
-                            ui.add_space(6.0);
+                        let border_color = if resp.hovered() {
+                            AppTheme::ACCENT_PRIMARY
+                        } else {
+                            AppTheme::BORDER_SUBTLE
+                        };
+
+                        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
+                        ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, border_color));
+
+                        let inner_rect = rect.shrink2(Vec2::new(12.0, 8.0));
+                        let mut item_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner_rect));
+                        item_ui.horizontal_centered(|ui| {
+                            ui.label(RichText::new("📄").size(20.0));
+                            ui.add_space(8.0);
                             ui.vertical(|ui| {
-                                ui.add_space(8.0);
                                 let truncated_fn = if att.filename.len() > 22 {
                                     format!("{}...", &att.filename[..19])
                                 } else {
@@ -344,11 +358,12 @@ impl MessageViewPane {
                                 ui.label(RichText::new(truncated_fn).size(12.0).strong().color(AppTheme::TEXT_PRIMARY));
                                 ui.add_space(2.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(format!("{} KB", size_kb)).size(10.5).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new(&size_text).size(10.5).color(AppTheme::TEXT_MUTED));
                                     ui.label(RichText::new("• ⬇ Download").size(10.5).color(AppTheme::ACCENT_PRIMARY));
                                 });
                             });
                         });
+
                         resp.on_hover_text(format!("Click to download '{}' to ~/Downloads and open", att.filename));
                     }
                 });
