@@ -45,9 +45,10 @@ webpki-roots = "0.26"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport", "pool"] }
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui = "0.29"
-egui_extras = { version = "0.29", features = ["image"] }
+egui_extras = { version = "0.29", features = ["all_loaders", "image", "http"] }
 ksni = { version = "0.3", default-features = false, features = ["tokio"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+
 html-escape = "0.2"
 regex = "1.10"
 futures = "0.3"

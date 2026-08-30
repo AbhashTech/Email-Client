@@ -233,18 +233,42 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
 
 fn extract_attribute(attrs: &str, attr_name: &str) -> Option<String> {
     let lower_attrs = attrs.to_lowercase();
-    let pattern = format!("{}=", attr_name.to_lowercase());
-    let pos = lower_attrs.find(&pattern)?;
-    let rest = attrs[pos + pattern.len()..].trim_start();
-    let quote_char = rest.chars().next()?;
-    if quote_char == '"' || quote_char == '\'' {
-        let end_quote = rest[1..].find(quote_char)?;
-        Some(rest[1..=end_quote].to_string())
-    } else {
-        let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
-        Some(rest[..end].to_string())
+    let name_lower = attr_name.to_lowercase();
+
+    let mut search_from = 0;
+    while let Some(pos) = lower_attrs[search_from..].find(&name_lower) {
+        let actual_pos = search_from + pos;
+        if actual_pos > 0 {
+            let prev_char = attrs[..actual_pos].chars().last().unwrap();
+            if !prev_char.is_whitespace() && prev_char != '<' {
+                search_from = actual_pos + name_lower.len();
+                continue;
+            }
+        }
+
+        let after_name = attrs[actual_pos + name_lower.len()..].trim_start();
+        if after_name.starts_with('=') {
+            let rest = after_name[1..].trim_start();
+            let quote_char = rest.chars().next()?;
+            if quote_char == '"' || quote_char == '\'' {
+                let end_quote = rest[1..].find(quote_char)?;
+                let extracted = rest[1..=end_quote].trim().to_string();
+                if !extracted.is_empty() {
+                    return Some(extracted);
+                }
+            } else {
+                let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
+                let extracted = rest[..end].trim().to_string();
+                if !extracted.is_empty() {
+                    return Some(extracted);
+                }
+            }
+        }
+        search_from = actual_pos + name_lower.len();
     }
+    None
 }
+
 
 fn clean_whitespace(s: &str) -> String {
     s.replace('\u{00A0}', " ")
