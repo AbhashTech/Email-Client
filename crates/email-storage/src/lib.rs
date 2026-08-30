@@ -6,6 +6,7 @@ use log::info;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Clone)]
@@ -264,6 +265,148 @@ impl Storage {
     // ==========================================
     // Messages
     // ==========================================
+
+    pub fn save_full_messages(
+        &self,
+        messages: &[(MessageHeader, Option<String>, Option<String>, Vec<Attachment>)],
+    ) -> Result<()> {
+        let mut conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| EmailError::Database(e.to_string()))?;
+        {
+            let mut msg_stmt = tx.prepare(
+                r#"
+                INSERT INTO messages (
+                    id, account_id, folder_id, uid, message_id, in_reply_to,
+                    subject, from_name, from_address, to_recipients_json, cc_recipients_json,
+                    date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
+                    body_plain, body_html, body_fetched, size_bytes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+                ON CONFLICT(folder_id, uid) DO UPDATE SET
+                    id=excluded.id,
+                    subject=excluded.subject,
+                    from_name=excluded.from_name,
+                    from_address=excluded.from_address,
+                    to_recipients_json=excluded.to_recipients_json,
+                    cc_recipients_json=excluded.cc_recipients_json,
+                    date_epoch=excluded.date_epoch,
+                    snippet=excluded.snippet,
+                    is_read=excluded.is_read,
+                    is_flagged=excluded.is_flagged,
+                    is_draft=excluded.is_draft,
+                    is_deleted=excluded.is_deleted,
+                    body_plain=COALESCE(excluded.body_plain, messages.body_plain),
+                    body_html=COALESCE(excluded.body_html, messages.body_html),
+                    body_fetched=MAX(excluded.body_fetched, messages.body_fetched),
+                    size_bytes=excluded.size_bytes
+                "#
+            ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+            let mut att_stmt = tx.prepare(
+                r#"
+                INSERT INTO attachments (
+                    id, message_id, filename, mime_type, size_bytes, content_id, is_inline, local_cache_path
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                ON CONFLICT(id) DO NOTHING
+                "#
+            ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+            for (m, plain, html, atts) in messages {
+                let to_json = serde_json::to_string(&m.to_recipients).unwrap_or_else(|_| "[]".to_string());
+                let cc_json = serde_json::to_string(&m.cc_recipients).unwrap_or_else(|_| "[]".to_string());
+                let body_fetched = if m.body_fetched || plain.is_some() || html.is_some() { 1 } else { 0 };
+
+                msg_stmt.execute(params![
+                    m.id,
+                    m.account_id,
+                    m.folder_id,
+                    m.uid,
+                    m.message_id,
+                    m.in_reply_to,
+                    m.subject,
+                    m.from_name,
+                    m.from_address,
+                    to_json,
+                    cc_json,
+                    m.date_epoch,
+                    m.snippet,
+                    if m.is_read { 1 } else { 0 },
+                    if m.is_flagged { 1 } else { 0 },
+                    if m.is_draft { 1 } else { 0 },
+                    if m.is_deleted { 1 } else { 0 },
+                    plain,
+                    html,
+                    body_fetched,
+                    m.size_bytes as i64,
+                ]).map_err(|e| EmailError::Database(e.to_string()))?;
+
+                for a in atts {
+                    att_stmt.execute(params![
+                        a.id,
+                        a.message_id,
+                        a.filename,
+                        a.mime_type,
+                        a.size_bytes as i64,
+                        a.content_id,
+                        if a.is_inline { 1 } else { 0 },
+                        a.local_cache_path,
+                    ]).map_err(|e| EmailError::Database(e.to_string()))?;
+                }
+            }
+        }
+        tx.commit().map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_folder_cached_uids(&self, folder_id: &str) -> Result<HashMap<u32, bool>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT uid, body_fetched FROM messages WHERE folder_id = ?1 AND is_deleted = 0")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![folder_id], |row| {
+                let uid: u32 = row.get(0)?;
+                let body_fetched: i32 = row.get(1)?;
+                Ok((uid, body_fetched == 1))
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut map = HashMap::new();
+        for r in rows {
+            let (uid, fetched) = r.map_err(|e| EmailError::Database(e.to_string()))?;
+            map.insert(uid, fetched);
+        }
+        Ok(map)
+    }
+
+    pub fn update_message_flags_batch(
+        &self,
+        folder_id: &str,
+        updates: &[(u32, bool, bool, bool)],
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| EmailError::Database(e.to_string()))?;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE messages SET is_read = ?1, is_flagged = ?2, is_deleted = ?3 WHERE folder_id = ?4 AND uid = ?5"
+            ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+            for (uid, is_read, is_flagged, is_deleted) in updates {
+                stmt.execute(params![
+                    if *is_read { 1 } else { 0 },
+                    if *is_flagged { 1 } else { 0 },
+                    if *is_deleted { 1 } else { 0 },
+                    folder_id,
+                    uid,
+                ]).map_err(|e| EmailError::Database(e.to_string()))?;
+            }
+        }
+        tx.commit().map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
 
     pub fn save_message_headers(&self, headers: &[MessageHeader]) -> Result<()> {
         let mut conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
@@ -822,6 +965,62 @@ mod tests {
         let sigs = storage.get_signatures(Some(&account.id)).unwrap();
         assert_eq!(sigs.len(), 1);
         assert!(sigs[0].is_default);
+
+        // 7. Test save_full_messages (Offline Ready full sync)
+        let header2 = MessageHeader {
+            id: "msg-456".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder1.id.clone(),
+            uid: 102,
+            message_id: Some("<msg456@example.com>".to_string()),
+            in_reply_to: None,
+            subject: "Offline Email Subject".to_string(),
+            from_name: Some("Sender Name".to_string()),
+            from_address: "sender@example.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Test User".to_string()), "test@example.com".to_string())],
+            cc_recipients: vec![],
+            date_epoch: 1725000050,
+            snippet: "Offline email body content...".to_string(),
+            is_read: false,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 4096,
+        };
+        let att2 = Attachment {
+            id: "att-1".to_string(),
+            message_id: "msg-456".to_string(),
+            filename: "invoice.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size_bytes: 1024,
+            content_id: None,
+            is_inline: false,
+            local_cache_path: Some("/tmp/invoice.pdf".to_string()),
+        };
+
+        storage.save_full_messages(&[(
+            header2.clone(),
+            Some("Offline email body content plain".to_string()),
+            Some("<p>Offline email body content html</p>".to_string()),
+            vec![att2],
+        )]).unwrap();
+
+        let cached_map = storage.get_folder_cached_uids(&folder1.id).unwrap();
+        assert_eq!(cached_map.get(&102), Some(&true));
+
+        let detail2 = storage.get_message_detail("msg-456").unwrap().expect("Detail 2 not found");
+        assert!(detail2.header.body_fetched);
+        assert_eq!(detail2.body_html.as_deref(), Some("<p>Offline email body content html</p>"));
+        assert_eq!(detail2.attachments.len(), 1);
+        assert_eq!(detail2.attachments[0].filename, "invoice.pdf");
+
+        // 8. Test update_message_flags_batch
+        storage.update_message_flags_batch(&folder1.id, &[(102, true, true, false)]).unwrap();
+        let msgs_updated = storage.get_messages(Some(&account.id), Some(&folder1.id), 10, 0, None).unwrap();
+        let updated_msg = msgs_updated.iter().find(|m| m.uid == 102).unwrap();
+        assert!(updated_msg.is_read);
+        assert!(updated_msg.is_flagged);
     }
 }
 

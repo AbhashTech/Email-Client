@@ -120,11 +120,23 @@ pub async fn sync_single_folder(
     let mut sorted_uids: Vec<u32> = uid_set.into_iter().collect();
     sorted_uids.sort_unstable();
 
-    let mut fetched_headers = Vec::new();
-    let mut max_uid = folder.last_synced_uid;
+    let cached_map = storage.get_folder_cached_uids(&folder.id).unwrap_or_default();
+    let mut unfetched_uids = Vec::new();
+    let mut cached_uids = Vec::new();
 
-    // Fetch full messages (Envelopes + Full MIME Bodies) in batches of 25 to optimize speed and memory
-    for chunk in sorted_uids.chunks(25) {
+    for uid in &sorted_uids {
+        if cached_map.get(uid) == Some(&true) {
+            cached_uids.push(*uid);
+        } else {
+            unfetched_uids.push(*uid);
+        }
+    }
+
+    let mut max_uid = folder.last_synced_uid;
+    let mut synced_new_or_updated = 0;
+
+    // 1. Download full emails (Full MIME + Attachments + Headers) for new or un-cached messages
+    for chunk in unfetched_uids.chunks(25) {
         let uid_range = if chunk.len() == 1 {
             format!("{}", chunk[0])
         } else {
@@ -133,9 +145,11 @@ pub async fn sync_single_folder(
         };
 
         let mut fetch_stream = session
-            .uid_fetch(&uid_range, "UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODY.PEEK[]")
+            .uid_fetch(&uid_range, "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])")
             .await
             .map_err(|e| EmailError::Imap(format!("UID FETCH failed for {}: {}", uid_range, e)))?;
+
+        let mut batch_records = Vec::new();
 
         while let Some(fetch) = fetch_stream
             .try_next()
@@ -147,34 +161,59 @@ pub async fn sync_single_folder(
                     max_uid = header.uid;
                 }
 
+                let mut plain_text = None;
+                let mut html_text = None;
+                let mut attachments = Vec::new();
+
                 // If full body bytes were returned, parse and store body and attachments immediately
                 if let Some(raw_body) = fetch.body() {
                     if let Ok(parsed) = parse_full_mime_and_enrich_header(raw_body, &mut header) {
-                        // Save body and attachments directly to SQLite
-                        let _ = storage.save_message_body(
-                            &header.id,
-                            parsed.plain_text.as_deref(),
-                            parsed.html_text.as_deref(),
-                        );
-
-                        if !parsed.attachments.is_empty() {
-                            let _ = storage.save_attachments(&parsed.attachments);
-                        }
+                        plain_text = parsed.plain_text;
+                        html_text = parsed.html_text;
+                        attachments = parsed.attachments;
                     }
                 }
 
-                fetched_headers.push(header);
+                batch_records.push((header, plain_text, html_text, attachments));
             }
         }
 
+        if !batch_records.is_empty() {
+            synced_new_or_updated += batch_records.len();
+            storage.save_full_messages(&batch_records)?;
+        }
     }
 
-    let new_count = fetched_headers.len();
-    if !fetched_headers.is_empty() {
-        storage.save_message_headers(&fetched_headers)?;
-        folder.last_synced_uid = max_uid;
+    // 2. Fast flag sync (Read / Flagged status) for already-cached offline messages
+    for chunk in cached_uids.chunks(100) {
+        let uid_range = if chunk.len() == 1 {
+            format!("{}", chunk[0])
+        } else {
+            let uids_str: Vec<String> = chunk.iter().map(|u| u.to_string()).collect();
+            uids_str.join(",")
+        };
+
+        if let Ok(mut fetch_stream) = session.uid_fetch(&uid_range, "(UID FLAGS)").await {
+            let mut flag_updates = Vec::new();
+            while let Ok(Some(fetch)) = fetch_stream.try_next().await {
+                if let Some(uid) = fetch.uid {
+                    if uid > max_uid {
+                        max_uid = uid;
+                    }
+                    let flags: Vec<async_imap::types::Flag> = fetch.flags().collect();
+                    let is_read = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
+                    let is_flagged = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Flagged));
+                    let is_deleted = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Deleted));
+                    flag_updates.push((uid, is_read, is_flagged, is_deleted));
+                }
+            }
+            if !flag_updates.is_empty() {
+                let _ = storage.update_message_flags_batch(&folder.id, &flag_updates);
+            }
+        }
     }
 
+    folder.last_synced_uid = max_uid;
     folder.total_messages = total_messages;
     folder.unread_messages = unread_messages;
     folder.uid_validity = uid_validity;
@@ -182,9 +221,9 @@ pub async fn sync_single_folder(
     let _ = storage.update_folder_stats(&folder.id, max_uid, total_messages, unread_messages);
 
     info!(
-        "Synced and fully downloaded {} complete messages for folder '{}'",
-        new_count, folder.remote_name
+        "Synced and offline-cached {} messages for folder '{}'",
+        synced_new_or_updated, folder.remote_name
     );
 
-    Ok(new_count)
+    Ok(synced_new_or_updated)
 }

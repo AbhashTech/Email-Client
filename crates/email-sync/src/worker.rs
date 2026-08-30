@@ -306,17 +306,12 @@ impl SyncWorker {
 
                 if let Some(bytes) = raw_bytes {
                     let parsed = parse_full_mime_and_enrich_header(&bytes, &mut header)?;
-                    storage.save_message_headers(&[header])?;
-
-                    storage.save_message_body(
-                        &message_id,
-                        parsed.plain_text.as_deref(),
-                        parsed.html_text.as_deref(),
-                    )?;
-
-                    if !parsed.attachments.is_empty() {
-                        storage.save_attachments(&parsed.attachments)?;
-                    }
+                    storage.save_full_messages(&[(
+                        header,
+                        parsed.plain_text,
+                        parsed.html_text,
+                        parsed.attachments,
+                    )])?;
                 }
 
                 if let Ok(Some(updated_detail)) = storage.get_message_detail(&message_id) {

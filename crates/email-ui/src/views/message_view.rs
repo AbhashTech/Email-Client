@@ -302,7 +302,7 @@ impl MessageViewPane {
                     for att in &detail.attachments {
                         let size_kb = att.size_bytes / 1024;
                         let (rect, resp) = ui.allocate_exact_size(
-                            Vec2::new(220.0, 40.0),
+                            Vec2::new(220.0, 48.0),
                             Sense::click(),
                         );
 
@@ -331,10 +331,17 @@ impl MessageViewPane {
                         let mut pill_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
                         pill_ui.horizontal(|ui| {
                             ui.add_space(8.0);
-                            ui.label(RichText::new("📄").size(15.0));
+                            ui.label(RichText::new("📄").size(16.0));
+                            ui.add_space(4.0);
                             ui.vertical(|ui| {
-                                ui.add_space(4.0);
-                                ui.label(RichText::new(&att.filename).size(11.5).strong().color(AppTheme::TEXT_PRIMARY));
+                                ui.add_space(6.0);
+                                let truncated_fn = if att.filename.len() > 24 {
+                                    format!("{}...", &att.filename[..21])
+                                } else {
+                                    att.filename.clone()
+                                };
+                                ui.label(RichText::new(truncated_fn).size(11.5).strong().color(AppTheme::TEXT_PRIMARY));
+                                ui.add_space(1.0);
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(format!("{} KB", size_kb)).size(10.0).color(AppTheme::TEXT_MUTED));
                                     ui.label(RichText::new("• ⬇ Download").size(10.0).color(AppTheme::ACCENT_PRIMARY));

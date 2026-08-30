@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderSelection {
-    UnifiedInbox,
     UnifiedFlagged,
     UnifiedUnread,
     Folder { account_id: String, folder_id: String },
@@ -70,23 +69,6 @@ impl SidebarView {
                             .color(AppTheme::TEXT_MUTED),
                     );
                     ui.add_space(4.0);
-
-                    // Compute total inbox unread
-                    let total_inbox_unread: u32 = folders_by_account
-                        .values()
-                        .flatten()
-                        .filter(|f| f.is_inbox())
-                        .map(|f| f.unread_messages)
-                        .sum();
-
-                    Self::render_folder_item(
-                        ui,
-                        "📥",
-                        "All Inboxes",
-                        total_inbox_unread,
-                        matches!(selected, FolderSelection::UnifiedInbox),
-                        || *selected = FolderSelection::UnifiedInbox,
-                    );
 
                     Self::render_folder_item(
                         ui,

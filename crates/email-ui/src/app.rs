@@ -67,7 +67,7 @@ impl EmailApp {
             selected_message_detail: None,
             templates: Vec::new(),
             signatures: Vec::new(),
-            selected_folder: FolderSelection::UnifiedInbox,
+            selected_folder: FolderSelection::UnifiedUnread,
             selected_message_id: None,
             search_query: String::new(),
             status_text: "Ready".to_string(),
@@ -132,7 +132,7 @@ impl EmailApp {
         };
 
         match &self.selected_folder {
-            FolderSelection::UnifiedInbox | FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
+            FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
                 if let Ok(mut msgs) = self.storage.get_messages(None, None, 500, 0, search) {
                     if matches!(self.selected_folder, FolderSelection::UnifiedFlagged) {
                         msgs.retain(|m| m.is_flagged);
@@ -185,7 +185,10 @@ impl EmailApp {
                 }
                 SyncEvent::BodyFetched { message_id, detail } => {
                     if self.selected_message_id.as_deref() == Some(&message_id) {
-                        self.selected_message_detail = Some(*detail);
+                        self.selected_message_detail = Some(*detail.clone());
+                    }
+                    if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                        *m = detail.header.clone();
                     }
                 }
                 SyncEvent::ConnectionTestResult {
@@ -370,17 +373,34 @@ impl App for EmailApp {
 
         if let Some((msg_id, is_read)) = on_toggle_read {
             let _ = self.storage.set_message_read(&msg_id, is_read);
-            self.reload_messages();
+            if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
+                m.is_read = is_read;
+            }
+            if let Some(ref mut detail) = self.selected_message_detail {
+                if detail.header.id == msg_id {
+                    detail.header.is_read = is_read;
+                }
+            }
         }
 
         if let Some((msg_id, is_flag)) = on_toggle_flag {
             let _ = self.storage.set_message_flagged(&msg_id, is_flag);
-            self.reload_messages();
+            if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
+                m.is_flagged = is_flag;
+            }
+            if let Some(ref mut detail) = self.selected_message_detail {
+                if detail.header.id == msg_id {
+                    detail.header.is_flagged = is_flag;
+                }
+            }
         }
 
         if prev_msg_id != self.selected_message_id {
             if let Some(ref mid) = self.selected_message_id {
                 let _ = self.storage.set_message_read(mid, true);
+                if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                    m.is_read = true;
+                }
                 if let Ok(detail_opt) = self.storage.get_message_detail(mid) {
                     self.selected_message_detail = detail_opt;
                 }

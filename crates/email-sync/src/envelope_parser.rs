@@ -3,6 +3,19 @@ use chrono::Utc;
 use email_core::models::{MessageHeader, Recipient};
 use uuid::Uuid;
 
+pub fn decode_rfc2047(val: &str) -> String {
+    let trimmed = val.trim();
+    if trimmed.contains("=?") {
+        if let Ok((header, _)) = mailparse::parse_header(format!("Subject: {}", trimmed).as_bytes()) {
+            let parsed_val = header.get_value();
+            if !parsed_val.is_empty() {
+                return parsed_val;
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
 pub fn parse_fetch_envelope(
     fetch: &Fetch,
     account_id: &str,
@@ -33,21 +46,26 @@ pub fn parse_fetch_envelope(
 
     if let Some(ref env) = fetch.envelope() {
         if let Some(ref subj_bytes) = env.subject {
-            subject = String::from_utf8_lossy(subj_bytes).to_string();
+            let raw_subj = String::from_utf8_lossy(subj_bytes);
+            subject = decode_rfc2047(&raw_subj);
         }
 
         if let Some(ref msg_id_bytes) = env.message_id {
-            message_id = Some(String::from_utf8_lossy(msg_id_bytes).to_string());
+            message_id = Some(String::from_utf8_lossy(msg_id_bytes).trim().to_string());
         }
 
         if let Some(ref reply_bytes) = env.in_reply_to {
-            in_reply_to = Some(String::from_utf8_lossy(reply_bytes).to_string());
+            in_reply_to = Some(String::from_utf8_lossy(reply_bytes).trim().to_string());
         }
 
         if let Some(ref from_list) = env.from {
             if let Some(first) = from_list.first() {
                 if let Some(ref name_bytes) = first.name {
-                    from_name = Some(String::from_utf8_lossy(name_bytes).to_string());
+                    let raw_name = String::from_utf8_lossy(name_bytes);
+                    let decoded_name = decode_rfc2047(&raw_name);
+                    if !decoded_name.is_empty() {
+                        from_name = Some(decoded_name);
+                    }
                 }
                 let host = first
                     .host
@@ -69,7 +87,10 @@ pub fn parse_fetch_envelope(
 
         if let Some(ref to_list) = env.to {
             for addr in to_list {
-                let name = addr.name.as_ref().map(|n| String::from_utf8_lossy(n).to_string());
+                let name = addr.name.as_ref().map(|n| {
+                    let raw_n = String::from_utf8_lossy(n);
+                    decode_rfc2047(&raw_n)
+                });
                 let host = addr.host.as_ref().map(|h| String::from_utf8_lossy(h).to_string()).unwrap_or_default();
                 let mailbox = addr.mailbox.as_ref().map(|m| String::from_utf8_lossy(m).to_string()).unwrap_or_default();
                 let email = if !host.is_empty() && !mailbox.is_empty() {
@@ -85,7 +106,10 @@ pub fn parse_fetch_envelope(
 
         if let Some(ref cc_list) = env.cc {
             for addr in cc_list {
-                let name = addr.name.as_ref().map(|n| String::from_utf8_lossy(n).to_string());
+                let name = addr.name.as_ref().map(|n| {
+                    let raw_n = String::from_utf8_lossy(n);
+                    decode_rfc2047(&raw_n)
+                });
                 let host = addr.host.as_ref().map(|h| String::from_utf8_lossy(h).to_string()).unwrap_or_default();
                 let mailbox = addr.mailbox.as_ref().map(|m| String::from_utf8_lossy(m).to_string()).unwrap_or_default();
                 let email = if !host.is_empty() && !mailbox.is_empty() {
@@ -127,4 +151,18 @@ pub fn parse_fetch_envelope(
         body_fetched: false,
         size_bytes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_rfc2047() {
+        let raw = "=?UTF-8?B?U2VjdXJpbmcgeW91ciBzZW5pb3IgeWVhcnMh?=";
+        assert_eq!(decode_rfc2047(raw), "Securing your senior years!");
+
+        let plain = "Hello World";
+        assert_eq!(decode_rfc2047(plain), "Hello World");
+    }
 }
