@@ -139,13 +139,13 @@ pub fn parse_full_mime_and_enrich_header(
         None
     };
 
-    // Populate snippet from plain text
+    // Populate snippet from plain text with normalized whitespace
     if let Some(ref plain) = plain_text {
-        let snippet: String = plain
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(120)
-            .collect();
+        let normalized: String = plain
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let snippet: String = normalized.chars().take(120).collect();
         if !snippet.trim().is_empty() {
             header.snippet = snippet;
         }
@@ -345,5 +345,34 @@ mod tests {
         assert_eq!(res.attachments.len(), 1);
         assert_eq!(res.attachments[0].filename, "report.pdf");
         assert_eq!(res.attachments[0].mime_type, "application/pdf");
+    }
+
+    #[test]
+    fn test_snippet_newline_spacing() {
+        let raw_email = b"From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n\r\nDear Sir,\r\nAttached herewith a file.\r\n";
+        let mut header = MessageHeader {
+            id: "msg-003".to_string(),
+            account_id: "acc-1".to_string(),
+            folder_id: "fol-1".to_string(),
+            uid: 3,
+            message_id: None,
+            in_reply_to: None,
+            subject: String::new(),
+            from_name: None,
+            from_address: String::new(),
+            to_recipients: Vec::new(),
+            cc_recipients: Vec::new(),
+            date_epoch: 0,
+            snippet: String::new(),
+            is_read: false,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: false,
+            size_bytes: 0,
+        };
+
+        let _ = parse_full_mime_and_enrich_header(raw_email, &mut header).unwrap();
+        assert_eq!(header.snippet, "Dear Sir, Attached herewith a file.");
     }
 }
