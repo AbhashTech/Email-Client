@@ -5,7 +5,7 @@ use email_core::models::MessageHeader;
 pub struct MessageListView;
 
 impl MessageListView {
-    pub const ROW_HEIGHT: f32 = 78.0;
+    pub const ROW_HEIGHT: f32 = 88.0;
 
     pub fn show(
         ui: &mut Ui,
@@ -132,11 +132,11 @@ impl MessageListView {
                             Color32::WHITE,
                         );
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
 
                         // 3. Message Content Columns
                         ui.vertical(|ui| {
-                            ui.add_space(4.0);
+                            ui.add_space(6.0);
 
                             // Row 1: Sender Name + Star + Date
                             ui.horizontal(|ui| {
@@ -173,6 +173,8 @@ impl MessageListView {
                                 });
                             });
 
+                            ui.add_space(1.0);
+
                             // Row 2: Subject Line
                             let truncated_subj = if msg.subject.is_empty() {
                                 "(No Subject)".to_string()
@@ -197,9 +199,11 @@ impl MessageListView {
                             };
                             ui.label(subj_style);
 
+                            ui.add_space(1.0);
+
                             // Row 3: Snippet Preview
-                            let snippet_text = if msg.snippet.len() > 80 {
-                                format!("{}...", &msg.snippet[..77])
+                            let snippet_text = if msg.snippet.len() > 75 {
+                                format!("{}...", &msg.snippet[..72])
                             } else {
                                 msg.snippet.clone()
                             };
@@ -208,6 +212,8 @@ impl MessageListView {
                                     .size(11.0)
                                     .color(AppTheme::TEXT_MUTED),
                             );
+
+                            ui.add_space(4.0);
                         });
                     });
 

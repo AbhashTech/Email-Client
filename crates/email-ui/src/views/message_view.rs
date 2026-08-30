@@ -90,7 +90,7 @@ impl MessageViewPane {
 
             // 3. Sender Header Card
             let header_card_rect = ui.available_rect_before_wrap();
-            let (card_rect, _) = ui.allocate_exact_size(Vec2::new(header_card_rect.width(), 64.0), Sense::hover());
+            let (card_rect, _) = ui.allocate_exact_size(Vec2::new(header_card_rect.width(), 70.0), Sense::hover());
             ui.painter().rect_filled(card_rect, Rounding::same(8.0), AppTheme::BG_CARD);
             ui.painter().rect_stroke(card_rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
 
@@ -114,11 +114,11 @@ impl MessageViewPane {
                     Color32::WHITE,
                 );
 
-                ui.add_space(8.0);
+                ui.add_space(10.0);
 
                 // Sender Info & Recipients
                 ui.vertical(|ui| {
-                    ui.add_space(8.0);
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(msg.sender_display())
@@ -147,6 +147,7 @@ impl MessageViewPane {
                         });
                     });
 
+                    ui.add_space(2.0);
 
                     // To / Cc line
                     ui.horizontal(|ui| {
@@ -235,7 +236,7 @@ impl MessageViewPane {
                                     let resolved_uri = if src.starts_with("cid:") {
                                         let cid_key = src.trim_start_matches("cid:").trim_matches(|c| c == '<' || c == '>');
                                         if let Some(matching_att) = detail.attachments.iter().find(|a| {
-                                            a.content_id.as_deref() == Some(cid_key) || a.filename == cid_key
+                                             a.content_id.as_deref() == Some(cid_key) || a.filename == cid_key
                                         }) {
                                             if let Some(ref path) = matching_att.local_cache_path {
                                                 format!("file://{}", path)
@@ -296,13 +297,13 @@ impl MessageViewPane {
                         .strong()
                         .color(AppTheme::TEXT_MUTED),
                 );
-                ui.add_space(8.0);
+                ui.add_space(10.0);
 
                 ui.horizontal_wrapped(|ui| {
                     for att in &detail.attachments {
                         let size_kb = att.size_bytes / 1024;
                         let (rect, resp) = ui.allocate_exact_size(
-                            Vec2::new(220.0, 48.0),
+                            Vec2::new(240.0, 56.0),
                             Sense::click(),
                         );
 
@@ -330,21 +331,21 @@ impl MessageViewPane {
 
                         let mut pill_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
                         pill_ui.horizontal(|ui| {
-                            ui.add_space(8.0);
-                            ui.label(RichText::new("📄").size(16.0));
-                            ui.add_space(4.0);
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("📄").size(18.0));
+                            ui.add_space(6.0);
                             ui.vertical(|ui| {
-                                ui.add_space(6.0);
-                                let truncated_fn = if att.filename.len() > 24 {
-                                    format!("{}...", &att.filename[..21])
+                                ui.add_space(8.0);
+                                let truncated_fn = if att.filename.len() > 22 {
+                                    format!("{}...", &att.filename[..19])
                                 } else {
                                     att.filename.clone()
                                 };
-                                ui.label(RichText::new(truncated_fn).size(11.5).strong().color(AppTheme::TEXT_PRIMARY));
-                                ui.add_space(1.0);
+                                ui.label(RichText::new(truncated_fn).size(12.0).strong().color(AppTheme::TEXT_PRIMARY));
+                                ui.add_space(2.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(format!("{} KB", size_kb)).size(10.0).color(AppTheme::TEXT_MUTED));
-                                    ui.label(RichText::new("• ⬇ Download").size(10.0).color(AppTheme::ACCENT_PRIMARY));
+                                    ui.label(RichText::new(format!("{} KB", size_kb)).size(10.5).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new("• ⬇ Download").size(10.5).color(AppTheme::ACCENT_PRIMARY));
                                 });
                             });
                         });
