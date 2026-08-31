@@ -34,6 +34,8 @@ pub struct EmailApp {
     status_text: String,
     status_toast: Option<(String, std::time::Instant)>,
     is_syncing: bool,
+    show_sidebar: bool,
+    show_message_list: bool,
 
     // Sub-views
     account_setup_view: AccountSetupView,
@@ -74,6 +76,8 @@ impl EmailApp {
             status_text: "Ready".to_string(),
             status_toast: None,
             is_syncing: false,
+            show_sidebar: true,
+            show_message_list: true,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
             settings_view: SettingsView::new(),
@@ -255,6 +259,25 @@ impl App for EmailApp {
                     self.settings_view.open();
                 }
 
+                ui.separator();
+
+                // Panel Visibility Toggles
+                if ui
+                    .selectable_label(self.show_sidebar, "📂 Sidebar")
+                    .on_hover_text("Toggle left sidebar (folders & accounts)")
+                    .clicked()
+                {
+                    self.show_sidebar = !self.show_sidebar;
+                }
+
+                if ui
+                    .selectable_label(self.show_message_list, "📋 Mail List")
+                    .on_hover_text("Toggle middle message list pane")
+                    .clicked()
+                {
+                    self.show_message_list = !self.show_message_list;
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.is_syncing {
                         ui.spinner();
@@ -311,44 +334,45 @@ impl App for EmailApp {
 
         // 3-Pane AT-mail-rs Layout using true SidePanels
         // 1. Left Sidebar Panel (Folders & Navigation)
+        if self.show_sidebar {
+            egui::SidePanel::left("sidebar_panel")
+                .resizable(true)
+                .default_width(230.0)
+                .min_width(180.0)
+                .max_width(320.0)
+                .show(ctx, |ui| {
+                    let prev_folder = self.selected_folder.clone();
+                    let mut on_add_account = false;
+                    let mut on_open_settings = false;
+                    let mut on_sync_all = false;
 
-        egui::SidePanel::left("sidebar_panel")
-            .resizable(true)
-            .default_width(230.0)
-            .min_width(180.0)
-            .max_width(320.0)
-            .show(ctx, |ui| {
-                let prev_folder = self.selected_folder.clone();
-                let mut on_add_account = false;
-                let mut on_open_settings = false;
-                let mut on_sync_all = false;
+                    SidebarView::show(
+                        ui,
+                        &self.accounts,
+                        &self.folders_by_account,
+                        &mut self.selected_folder,
+                        &mut on_add_account,
+                        &mut on_open_settings,
+                        &mut on_sync_all,
+                    );
 
-                SidebarView::show(
-                    ui,
-                    &self.accounts,
-                    &self.folders_by_account,
-                    &mut self.selected_folder,
-                    &mut on_add_account,
-                    &mut on_open_settings,
-                    &mut on_sync_all,
-                );
+                    if on_add_account {
+                        self.account_setup_view.open();
+                    }
+                    if on_open_settings {
+                        self.settings_view.open();
+                    }
+                    if on_sync_all {
+                        let _ = self.cmd_tx.send(SyncCommand::SyncAll);
+                    }
 
-                if on_add_account {
-                    self.account_setup_view.open();
-                }
-                if on_open_settings {
-                    self.settings_view.open();
-                }
-                if on_sync_all {
-                    let _ = self.cmd_tx.send(SyncCommand::SyncAll);
-                }
-
-                if prev_folder != self.selected_folder {
-                    self.selected_message_id = None;
-                    self.selected_message_detail = None;
-                    self.reload_messages();
-                }
-            });
+                    if prev_folder != self.selected_folder {
+                        self.selected_message_id = None;
+                        self.selected_message_detail = None;
+                        self.reload_messages();
+                    }
+                });
+        }
 
         // 2. Middle Message List Panel (Virtualized)
         let prev_msg_id = self.selected_message_id.clone();
@@ -356,21 +380,23 @@ impl App for EmailApp {
         let mut on_toggle_read = None;
         let mut on_toggle_flag = None;
 
-        egui::SidePanel::left("message_list_panel")
-            .resizable(true)
-            .default_width(360.0)
-            .min_width(260.0)
-            .max_width(600.0)
-            .show(ctx, |ui| {
-                MessageListView::show(
-                    ui,
-                    &self.messages,
-                    &mut self.selected_message_id,
-                    &mut self.search_query,
-                    &mut on_toggle_read,
-                    &mut on_toggle_flag,
-                );
-            });
+        if self.show_message_list {
+            egui::SidePanel::left("message_list_panel")
+                .resizable(true)
+                .default_width(360.0)
+                .min_width(260.0)
+                .max_width(600.0)
+                .show(ctx, |ui| {
+                    MessageListView::show(
+                        ui,
+                        &self.messages,
+                        &mut self.selected_message_id,
+                        &mut self.search_query,
+                        &mut on_toggle_read,
+                        &mut on_toggle_flag,
+                    );
+                });
+        }
 
         if prev_search != self.search_query {
             self.reload_messages();
