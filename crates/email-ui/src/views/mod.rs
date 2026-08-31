@@ -8,7 +8,8 @@ pub mod sidebar;
 
 pub use account_setup::AccountSetupView;
 pub use command_palette::{CommandPalette, PaletteAction, PaletteItem};
-pub use compose::ComposeView;
+#[allow(unused_imports)]
+pub use compose::{ComposeFormat, ComposeView};
 pub use message_list::MessageListView;
 pub use message_view::MessageViewPane;
 pub use settings::SettingsView;

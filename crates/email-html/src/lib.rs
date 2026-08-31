@@ -514,6 +514,213 @@ pub fn html_to_plain_text(html: &str) -> String {
     normalized
 }
 
+/// Convert Markdown text into clean, email-safe HTML with inline styling
+pub fn markdown_to_html(md: &str) -> String {
+    let mut html = String::new();
+    let lines: Vec<&str> = md.lines().collect();
+    let mut in_code_block = false;
+    let mut code_block_buf = String::new();
+    let mut in_ul = false;
+    let mut in_ol = false;
+
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Code block toggle
+        if trimmed.starts_with("```") {
+            if in_code_block {
+                html.push_str("<pre style=\"background-color: #1e2433; color: #e2e8f0; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto; margin: 10px 0;\"><code>");
+                html.push_str(&html_escape::encode_text(&code_block_buf));
+                html.push_str("</code></pre>\n");
+                code_block_buf.clear();
+                in_code_block = false;
+            } else {
+                if in_ul {
+                    html.push_str("</ul>\n");
+                    in_ul = false;
+                }
+                if in_ol {
+                    html.push_str("</ol>\n");
+                    in_ol = false;
+                }
+                in_code_block = true;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_code_block {
+            if !code_block_buf.is_empty() {
+                code_block_buf.push('\n');
+            }
+            code_block_buf.push_str(line);
+            i += 1;
+            continue;
+        }
+
+        // Horizontal rule
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            if in_ul {
+                html.push_str("</ul>\n");
+                in_ul = false;
+            }
+            if in_ol {
+                html.push_str("</ol>\n");
+                in_ol = false;
+            }
+            html.push_str("<hr style=\"border: none; border-top: 1px solid #cbd5e1; margin: 16px 0;\" />\n");
+            i += 1;
+            continue;
+        }
+
+        // Headings
+        if trimmed.starts_with("# ") {
+            if in_ul { html.push_str("</ul>\n"); in_ul = false; }
+            if in_ol { html.push_str("</ol>\n"); in_ol = false; }
+            let content = inline_markdown_to_html(&trimmed[2..]);
+            html.push_str(&format!("<h1 style=\"font-size: 22px; font-weight: bold; margin: 16px 0 8px 0; color: #1e293b;\">{}</h1>\n", content));
+            i += 1;
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            if in_ul { html.push_str("</ul>\n"); in_ul = false; }
+            if in_ol { html.push_str("</ol>\n"); in_ol = false; }
+            let content = inline_markdown_to_html(&trimmed[3..]);
+            html.push_str(&format!("<h2 style=\"font-size: 18px; font-weight: bold; margin: 14px 0 6px 0; color: #1e293b;\">{}</h2>\n", content));
+            i += 1;
+            continue;
+        }
+        if trimmed.starts_with("### ") {
+            if in_ul { html.push_str("</ul>\n"); in_ul = false; }
+            if in_ol { html.push_str("</ol>\n"); in_ol = false; }
+            let content = inline_markdown_to_html(&trimmed[4..]);
+            html.push_str(&format!("<h3 style=\"font-size: 15px; font-weight: bold; margin: 12px 0 4px 0; color: #1e293b;\">{}</h3>\n", content));
+            i += 1;
+            continue;
+        }
+
+        // Blockquotes
+        if trimmed.starts_with("> ") || trimmed == ">" {
+            if in_ul { html.push_str("</ul>\n"); in_ul = false; }
+            if in_ol { html.push_str("</ol>\n"); in_ol = false; }
+            let quote_text = if trimmed.len() > 2 { &trimmed[2..] } else { "" };
+            let content = inline_markdown_to_html(quote_text);
+            html.push_str(&format!("<blockquote style=\"border-left: 3px solid #3b82f6; margin: 10px 0; padding-left: 12px; color: #475569; font-style: italic;\">{}</blockquote>\n", content));
+            i += 1;
+            continue;
+        }
+
+        // Unordered lists
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+            if in_ol {
+                html.push_str("</ol>\n");
+                in_ol = false;
+            }
+            if !in_ul {
+                html.push_str("<ul style=\"margin: 8px 0; padding-left: 24px;\">\n");
+                in_ul = true;
+            }
+            let item_text = inline_markdown_to_html(&trimmed[2..]);
+            html.push_str(&format!("<li style=\"margin: 4px 0;\">{}</li>\n", item_text));
+            i += 1;
+            continue;
+        }
+
+        // Ordered lists
+        if let Some(pos) = trimmed.find(". ") {
+            if pos > 0 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) {
+                if in_ul {
+                    html.push_str("</ul>\n");
+                    in_ul = false;
+                }
+                if !in_ol {
+                    html.push_str("<ol style=\"margin: 8px 0; padding-left: 24px;\">\n");
+                    in_ol = true;
+                }
+                let item_text = inline_markdown_to_html(&trimmed[pos + 2..]);
+                html.push_str(&format!("<li style=\"margin: 4px 0;\">{}</li>\n", item_text));
+                i += 1;
+                continue;
+            }
+        }
+
+        // Blank line
+        if trimmed.is_empty() {
+            if in_ul {
+                html.push_str("</ul>\n");
+                in_ul = false;
+            }
+            if in_ol {
+                html.push_str("</ol>\n");
+                in_ol = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Regular paragraph
+        if in_ul {
+            html.push_str("</ul>\n");
+            in_ul = false;
+        }
+        if in_ol {
+            html.push_str("</ol>\n");
+            in_ol = false;
+        }
+        let content = inline_markdown_to_html(trimmed);
+        html.push_str(&format!("<p style=\"margin: 8px 0; line-height: 1.5;\">{}</p>\n", content));
+        i += 1;
+    }
+
+    if in_code_block {
+        html.push_str("<pre style=\"background-color: #1e2433; color: #e2e8f0; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto; margin: 10px 0;\"><code>");
+        html.push_str(&html_escape::encode_text(&code_block_buf));
+        html.push_str("</code></pre>\n");
+    }
+    if in_ul {
+        html.push_str("</ul>\n");
+    }
+    if in_ol {
+        html.push_str("</ol>\n");
+    }
+
+    html
+}
+
+fn inline_markdown_to_html(text: &str) -> String {
+    let mut res = text.to_string();
+
+    // 1. Links: [title](url)
+    static LINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
+    res = LINK_RE.replace_all(&res, "<a href=\"$2\" style=\"color: #2563eb; text-decoration: underline;\">$1</a>").to_string();
+
+    // 2. Bold+Italic: ***text***
+    static BOLD_ITALIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*\*([^*]+)\*\*\*").unwrap());
+    res = BOLD_ITALIC_RE.replace_all(&res, "<strong><em>$1</em></strong>").to_string();
+
+    // 3. Bold: **text** or __text__
+    static BOLD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*([^*]+)\*\*|__([^_]+)__").unwrap());
+    res = BOLD_RE.replace_all(&res, |caps: &regex::Captures| {
+        let val = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
+        format!("<strong>{}</strong>", val)
+    }).to_string();
+
+    // 4. Italic: *text* or _text_
+    static ITALIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+)\*|_([^_]+)_").unwrap());
+    res = ITALIC_RE.replace_all(&res, |caps: &regex::Captures| {
+        let val = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
+        format!("<em>{}</em>", val)
+    }).to_string();
+
+    // 5. Inline code: `code`
+    static CODE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
+    res = CODE_RE.replace_all(&res, "<code style=\"background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: monospace; font-size: 90%; color: #e11d48;\">$1</code>").to_string();
+
+    res
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +741,17 @@ mod tests {
         assert!(plain.contains("Hi John,"));
         assert!(plain.contains("tomorrow at 10 AM."));
         assert!(!plain.contains("comments"));
+    }
+
+    #[test]
+    fn test_markdown_to_html_converter() {
+        let md = "# Weekly Sprint\n\nHello **Team**,\n\nPlease review `crates/email-ui` and check [our roadmap](https://example.com).\n\n- Task 1\n- Task 2\n\n```rust\nfn main() {}\n```\n\n> Keep shipping!";
+        let html = markdown_to_html(md);
+        assert!(html.contains("<h1"));
+        assert!(html.contains("<strong>Team</strong>"));
+        assert!(html.contains("<code"));
+        assert!(html.contains("<a href=\"https://example.com\""));
+        assert!(html.contains("<li"));
+        assert!(html.contains("<blockquote"));
     }
 }

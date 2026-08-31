@@ -1,10 +1,17 @@
 use crate::theme::AppTheme;
-use egui::{Color32, RichText, Rounding, Window};
+use egui::{Color32, RichText, Rounding, Stroke, Window};
 use email_core::events::SyncCommand;
 use email_core::models::{Account, MessageHeader, OutgoingDraft, Recipient, Signature, Template};
 use email_keychain::CredentialStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeFormat {
+    Html,
+    PlainText,
+    Markdown,
+}
 
 pub struct ComposeView {
     pub is_open: bool,
@@ -17,6 +24,8 @@ pub struct ComposeView {
     pub body_plain: String,
     pub reply_quote: Option<String>,
     pub show_cc_bcc: bool,
+    pub format: ComposeFormat,
+    pub show_markdown_preview: bool,
     pub send_as_html: bool,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
@@ -60,6 +69,8 @@ impl ComposeView {
             body_plain: String::new(),
             reply_quote: None,
             show_cc_bcc: false,
+            format: ComposeFormat::Markdown,
+            show_markdown_preview: false,
             send_as_html: true,
             in_reply_to: None,
             references: None,
@@ -76,6 +87,8 @@ impl ComposeView {
         self.body_plain.clear();
         self.reply_quote = None;
         self.show_cc_bcc = false;
+        self.format = ComposeFormat::Markdown;
+        self.show_markdown_preview = false;
         self.send_as_html = true;
         self.in_reply_to = None;
         self.references = None;
@@ -113,6 +126,8 @@ impl ComposeView {
         self.body_plain.clear();
         self.reply_quote = Some(email_html::html_to_plain_text(body_quote));
         self.selected_signature_id = find_default_signature(signatures, Some(account_id)).map(|s| s.id.clone());
+        self.format = if send_as_html { ComposeFormat::Html } else { ComposeFormat::PlainText };
+        self.show_markdown_preview = false;
         self.send_as_html = send_as_html;
         self.error_msg = None;
     }
@@ -283,33 +298,75 @@ impl ComposeView {
                 // 4. Format Selector & Rich Formatting Action Bar
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Format:").size(12.0).color(AppTheme::TEXT_MUTED));
-                    if ui.selectable_label(self.send_as_html, "🌐 HTML (Default)").on_hover_text("Send rich HTML email (default)").clicked() {
+                    if ui.selectable_label(self.format == ComposeFormat::Markdown, "⚡ Markdown").on_hover_text("Write in Markdown with live preview").clicked() {
+                        self.format = ComposeFormat::Markdown;
                         self.send_as_html = true;
                     }
-                    if ui.selectable_label(!self.send_as_html, "📝 Plain Text").on_hover_text("Send text-only email without HTML markup").clicked() {
+                    if ui.selectable_label(self.format == ComposeFormat::Html, "🌐 HTML").on_hover_text("Send rich HTML email").clicked() {
+                        self.format = ComposeFormat::Html;
+                        self.send_as_html = true;
+                    }
+                    if ui.selectable_label(self.format == ComposeFormat::PlainText, "📝 Plain Text").on_hover_text("Send text-only email without HTML markup").clicked() {
+                        self.format = ComposeFormat::PlainText;
                         self.send_as_html = false;
                     }
 
                     ui.separator();
 
-                    if self.send_as_html {
-                        if ui.button(RichText::new("B").strong()).on_hover_text("Bold <b></b>").clicked() {
-                            self.body_plain.push_str("<b></b>");
+                    match self.format {
+                        ComposeFormat::Markdown => {
+                            if ui.button(RichText::new("B").strong()).on_hover_text("Bold **text**").clicked() {
+                                self.body_plain.push_str("**text**");
+                            }
+                            if ui.button(RichText::new("I").italics()).on_hover_text("Italic *text*").clicked() {
+                                self.body_plain.push_str("*text*");
+                            }
+                            if ui.button(RichText::new("🔗").size(12.0)).on_hover_text("Insert Link [title](url)").clicked() {
+                                self.body_plain.push_str("[Link text](https://)");
+                            }
+                            if ui.button(RichText::new("H1").strong()).on_hover_text("Heading 1 # ").clicked() {
+                                self.body_plain.push_str("\n# ");
+                            }
+                            if ui.button(RichText::new("H2").strong()).on_hover_text("Heading 2 ## ").clicked() {
+                                self.body_plain.push_str("\n## ");
+                            }
+                            if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list - ").clicked() {
+                                self.body_plain.push_str("\n- ");
+                            }
+                            if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote > ").clicked() {
+                                self.body_plain.push_str("\n> ");
+                            }
+                            if ui.button(RichText::new("💻 Code").size(11.0)).on_hover_text("Code block ```").clicked() {
+                                self.body_plain.push_str("\n```\n\n```\n");
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let preview_icon = if self.show_markdown_preview { "👁 Hide Preview" } else { "👁 Live Preview" };
+                                if ui.selectable_label(self.show_markdown_preview, preview_icon).on_hover_text("Toggle live side-by-side Markdown HTML preview").clicked() {
+                                    self.show_markdown_preview = !self.show_markdown_preview;
+                                }
+                            });
                         }
-                        if ui.button(RichText::new("I").italics()).on_hover_text("Italic <i></i>").clicked() {
-                            self.body_plain.push_str("<i></i>");
+                        ComposeFormat::Html => {
+                            if ui.button(RichText::new("B").strong()).on_hover_text("Bold <b></b>").clicked() {
+                                self.body_plain.push_str("<b></b>");
+                            }
+                            if ui.button(RichText::new("I").italics()).on_hover_text("Italic <i></i>").clicked() {
+                                self.body_plain.push_str("<i></i>");
+                            }
+                            if ui.button(RichText::new("🔗").size(12.0)).on_hover_text("Insert Link <a href=\"...\">").clicked() {
+                                self.body_plain.push_str("<a href=\"https://\">Link text</a>");
+                            }
+                            if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list").clicked() {
+                                self.body_plain.push_str("\n • ");
+                            }
+                            if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote").clicked() {
+                                self.body_plain.push_str("\n > ");
+                            }
                         }
-                        if ui.button(RichText::new("🔗").size(12.0)).on_hover_text("Insert Link <a href=\"...\">").clicked() {
-                            self.body_plain.push_str("<a href=\"https://\">Link text</a>");
+                        ComposeFormat::PlainText => {
+                            ui.label(RichText::new("Plain text mode active").size(11.0).color(AppTheme::TEXT_MUTED));
                         }
-                        if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list").clicked() {
-                            self.body_plain.push_str("\n • ");
-                        }
-                        if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote").clicked() {
-                            self.body_plain.push_str("\n > ");
-                        }
-                    } else {
-                        ui.label(RichText::new("Plain text mode active").size(11.0).color(AppTheme::TEXT_MUTED));
                     }
                 });
 
@@ -317,52 +374,153 @@ impl ComposeView {
                 ui.separator();
                 ui.add_space(4.0);
 
-                // 5. Body Text Editor & Content (Scrollable & stable height)
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.body_plain)
-                                .hint_text("Type your message here...")
-                                .font(egui::TextStyle::Body)
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(13),
-                        );
+                // 5. Body Text Editor & Content
+                if self.format == ComposeFormat::Markdown && self.show_markdown_preview {
+                    ui.columns(2, |columns| {
+                        // Left: Editor
+                        columns[0].vertical(|ui| {
+                            ui.label(RichText::new("✏ Markdown Editor").size(11.0).color(AppTheme::TEXT_MUTED));
+                            ui.add_space(2.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("compose_md_editor")
+                                .max_height(260.0)
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut self.body_plain)
+                                            .hint_text("Write Markdown here (#, **, *, -, ```, etc)...")
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_width(f32::INFINITY)
+                                            .desired_rows(12),
+                                    );
+                                });
+                        });
 
-                        ui.add_space(6.0);
+                        // Right: Live Preview
+                        columns[1].vertical(|ui| {
+                            ui.label(RichText::new("👁 Live Preview").size(11.0).color(AppTheme::ACCENT_PRIMARY));
+                            ui.add_space(2.0);
+                            let compiled_html = email_html::markdown_to_html(&self.body_plain);
+                            let blocks = email_html::parse_html_to_blocks(&compiled_html);
 
-                        // Attached Signature preview info
-                        if let Some(ref sig_id) = self.selected_signature_id {
-                            if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
-                                    ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
-                                    let plain_preview = email_html::html_to_plain_text(&sig.content_html);
-                                    let truncated = if plain_preview.len() > 50 {
-                                        format!("{}...", &plain_preview[..47])
-                                    } else {
-                                        plain_preview
-                                    };
-                                    ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
+                            egui::Frame::none()
+                                .fill(Color32::from_rgb(22, 27, 40))
+                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                .rounding(Rounding::same(6.0))
+                                .inner_margin(8.0)
+                                .show(ui, |ui| {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("compose_md_preview")
+                                        .max_height(244.0)
+                                        .auto_shrink([false; 2])
+                                        .show(ui, |ui| {
+                                            if self.body_plain.trim().is_empty() {
+                                                ui.label(RichText::new("Live preview will appear here as you type...").italics().color(AppTheme::TEXT_MUTED));
+                                            } else {
+                                                for block in &blocks {
+                                                    match block {
+                                                        email_html::HtmlBlock::Heading { level, text, .. } => {
+                                                            let size = match level { 1 => 18.0, 2 => 15.0, _ => 13.0 };
+                                                            ui.label(RichText::new(text).size(size).strong().color(Color32::WHITE));
+                                                        }
+                                                        email_html::HtmlBlock::Paragraph { spans, .. } => {
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                for span in spans {
+                                                                    let mut rt = RichText::new(&span.text).size(12.5);
+                                                                    if span.link_url.is_some() {
+                                                                        rt = rt.color(AppTheme::ACCENT_PRIMARY).underline();
+                                                                    } else {
+                                                                        rt = rt.color(AppTheme::TEXT_PRIMARY);
+                                                                    }
+                                                                    if matches!(span.style, email_html::TextStyle::Bold | email_html::TextStyle::BoldItalic) {
+                                                                        rt = rt.strong();
+                                                                    }
+                                                                    if matches!(span.style, email_html::TextStyle::Italic | email_html::TextStyle::BoldItalic) {
+                                                                        rt = rt.italics();
+                                                                    }
+                                                                    ui.label(rt);
+                                                                }
+                                                            });
+                                                        }
+                                                        email_html::HtmlBlock::CodeBlock(code) => {
+                                                            egui::Frame::none()
+                                                                .fill(Color32::from_rgb(14, 18, 28))
+                                                                .rounding(Rounding::same(4.0))
+                                                                .inner_margin(6.0)
+                                                                .show(ui, |ui| {
+                                                                    ui.label(RichText::new(code).font(egui::FontId::monospace(11.5)).color(Color32::from_rgb(220, 230, 245)));
+                                                                });
+                                                        }
+                                                        email_html::HtmlBlock::Blockquote(quote) => {
+                                                            ui.horizontal(|ui| {
+                                                                ui.label(RichText::new("▎").color(AppTheme::ACCENT_PRIMARY));
+                                                                ui.label(RichText::new(quote).italics().color(AppTheme::TEXT_SECONDARY));
+                                                            });
+                                                        }
+                                                        email_html::HtmlBlock::ListItem(spans) => {
+                                                            ui.horizontal(|ui| {
+                                                                ui.label(RichText::new("•").size(12.0).color(AppTheme::ACCENT_PRIMARY));
+                                                                for span in spans {
+                                                                    ui.label(RichText::new(&span.text).size(12.0).color(AppTheme::TEXT_PRIMARY));
+                                                                }
+                                                            });
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                    ui.add_space(2.0);
+                                                }
+                                            }
+                                        });
+                                });
+                        });
+                    });
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.body_plain)
+                                    .hint_text("Type your message here...")
+                                    .font(egui::TextStyle::Body)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(13),
+                            );
+
+                            ui.add_space(6.0);
+
+                            // Attached Signature preview info
+                            if let Some(ref sig_id) = self.selected_signature_id {
+                                if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
+                                        ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
+                                        let plain_preview = email_html::html_to_plain_text(&sig.content_html);
+                                        let truncated = if plain_preview.len() > 50 {
+                                            format!("{}...", &plain_preview[..47])
+                                        } else {
+                                            plain_preview
+                                        };
+                                        ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
+                                    });
+                                }
+                            }
+
+                            // Quoted Previous Message expandable
+                            if let Some(ref quote) = self.reply_quote {
+                                ui.add_space(4.0);
+                                ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
+                                    ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
                                 });
                             }
-                        }
 
-                        // Quoted Previous Message expandable
-                        if let Some(ref quote) = self.reply_quote {
-                            ui.add_space(4.0);
-                            ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
-                                ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
-                            });
-                        }
+                            if let Some(ref err) = self.error_msg {
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
+                            }
 
-                        if let Some(ref err) = self.error_msg {
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
-                        }
-
-                        ui.add_space(8.0);
-                    });
+                            ui.add_space(8.0);
+                        });
+                }
             });
 
         self.is_open = self.is_open && is_open;
@@ -427,20 +585,35 @@ impl ComposeView {
             (String::new(), String::new())
         };
 
-        let (body_plain, body_html) = if self.send_as_html {
-            let user_plain = email_html::html_to_plain_text(&self.body_plain);
-            let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-            let html = format!(
-                "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
-                self.body_plain.replace('\n', "<br/>"),
-                sig_html,
-                quote_html
-            );
-            (plain, Some(html))
-        } else {
-            let user_plain = email_html::html_to_plain_text(&self.body_plain);
-            let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-            (plain, None)
+        let (body_plain, body_html) = match self.format {
+            ComposeFormat::Markdown => {
+                let generated_html = email_html::markdown_to_html(&self.body_plain);
+                let user_plain = self.body_plain.clone();
+                let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+                let html = format!(
+                    "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
+                    generated_html,
+                    sig_html,
+                    quote_html
+                );
+                (plain, Some(html))
+            }
+            ComposeFormat::Html => {
+                let user_plain = email_html::html_to_plain_text(&self.body_plain);
+                let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+                let html = format!(
+                    "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
+                    self.body_plain.replace('\n', "<br/>"),
+                    sig_html,
+                    quote_html
+                );
+                (plain, Some(html))
+            }
+            ComposeFormat::PlainText => {
+                let user_plain = email_html::html_to_plain_text(&self.body_plain);
+                let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+                (plain, None)
+            }
         };
 
         let draft = OutgoingDraft {
@@ -620,6 +793,17 @@ mod tests {
         assert_eq!(cc, "bob@work.com, carol@work.com");
         assert!(!to.contains("kunal@abhashtech.com"));
         assert!(!cc.contains("kunal@abhashtech.com"));
+    }
+
+    #[test]
+    fn test_markdown_compose_mode() {
+        let mut compose = ComposeView::new();
+        compose.open_new(Some("acc1"), &[]);
+        assert_eq!(compose.format, ComposeFormat::Markdown);
+        assert!(!compose.show_markdown_preview);
+
+        compose.show_markdown_preview = true;
+        assert!(compose.show_markdown_preview);
     }
 }
 
