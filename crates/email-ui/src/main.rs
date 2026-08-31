@@ -17,6 +17,15 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 
 fn main() -> Result<(), eframe::Error> {
+    // Check if invoked as in-app WebKit webview subprocess
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 3 && args[1] == "--webview" {
+        let file_path = std::path::Path::new(&args[2]);
+        let title = args.get(3).map(|s| s.as_str()).unwrap_or("Email Preview");
+        crate::webview::run_standalone_webview(file_path, title);
+        return Ok(());
+    }
+
     // Install default Rustls cryptographic provider (Ring)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
