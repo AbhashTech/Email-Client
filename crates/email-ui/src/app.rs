@@ -44,6 +44,7 @@ pub struct EmailApp {
     focus_search_requested: bool,
     allowed_remote_images: HashSet<String>,
     pending_send: Option<PendingSend>,
+    current_theme: crate::theme::ThemePreset,
     status_text: String,
     status_toast: Option<(String, std::time::Instant)>,
     is_syncing: bool,
@@ -67,8 +68,8 @@ impl EmailApp {
         event_rx: broadcast::Receiver<SyncEvent>,
         rt_handle: tokio::runtime::Handle,
     ) -> Self {
-        // Apply our custom sleek dark theme
-        AppTheme::apply(&cc.egui_ctx);
+        let current_theme = crate::theme::ThemePreset::DarkSlate;
+        AppTheme::apply_preset(&cc.egui_ctx, current_theme);
 
         let tray = AppTray::new(cmd_tx.clone(), rt_handle);
 
@@ -92,6 +93,7 @@ impl EmailApp {
             focus_search_requested: false,
             allowed_remote_images: HashSet::new(),
             pending_send: None,
+            current_theme,
             status_text: "Ready".to_string(),
             status_toast: None,
             is_syncing: false,
@@ -371,11 +373,26 @@ impl EmailApp {
             });
         }
 
+        // Theme Presets
+        for preset in crate::theme::ThemePreset::all() {
+            items.push(PaletteItem {
+                id: format!("theme_{:?}", preset),
+                title: format!("Switch Theme: {}", preset.display_name()),
+                category: "Themes".into(),
+                shortcut: None,
+                action: PaletteAction::SetTheme(*preset),
+            });
+        }
+
         self.command_palette.set_items(items);
     }
 
     pub fn execute_palette_action(&mut self, action: PaletteAction) {
         match action {
+            PaletteAction::SetTheme(preset) => {
+                self.current_theme = preset;
+                self.status_toast = Some((format!("Switched to {} theme", preset.display_name()), std::time::Instant::now()));
+            }
             PaletteAction::Compose => {
                 self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
             }
@@ -1106,6 +1123,7 @@ impl App for EmailApp {
             &self.folders_by_account,
             &mut self.templates,
             &mut self.signatures,
+            &mut self.current_theme,
             &self.storage,
             &self.keyring,
             &self.cmd_tx,
@@ -1129,7 +1147,13 @@ impl App for EmailApp {
 
         // Render Command Palette
         if let Some(action) = self.command_palette.show(ctx) {
-            self.execute_palette_action(action);
+            if let PaletteAction::SetTheme(preset) = action {
+                self.current_theme = preset;
+                AppTheme::apply_preset(ctx, preset);
+                self.status_toast = Some((format!("Switched to {} theme", preset.display_name()), std::time::Instant::now()));
+            } else {
+                self.execute_palette_action(action);
+            }
         }
 
         // Global Keyboard Shortcuts (active when no modal is open and no text input is focused)

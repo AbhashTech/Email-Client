@@ -14,6 +14,7 @@ pub enum SettingsTab {
     Accounts,
     Signatures,
     Templates,
+    Appearance,
     General,
 }
 
@@ -72,6 +73,7 @@ impl SettingsView {
         folders_by_account: &HashMap<String, Vec<Folder>>,
         templates: &mut Vec<Template>,
         signatures: &mut Vec<Signature>,
+        current_theme: &mut crate::theme::ThemePreset,
         storage: &Storage,
         keyring: &Arc<dyn CredentialStore>,
         cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
@@ -96,6 +98,7 @@ impl SettingsView {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Accounts, "📬 Accounts");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Signatures, "📝 Signatures");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Templates, "📋 Templates & Snippets");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Appearance, "🎨 Appearance");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
                 });
 
@@ -137,6 +140,9 @@ impl SettingsView {
                         }
                         SettingsTab::Templates => {
                             self.show_templates_tab(ui, templates, storage, on_data_changed);
+                        }
+                        SettingsTab::Appearance => {
+                            self.show_appearance_tab(ui, ctx, current_theme);
                         }
                         SettingsTab::General => {
                             self.show_general_tab(ui, accounts, storage);
@@ -451,6 +457,55 @@ impl SettingsView {
                 self.status_msg = Some((true, "Template saved successfully.".to_string()));
                 *on_data_changed = true;
             }
+        }
+    }
+
+    fn show_appearance_tab(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        current_theme: &mut crate::theme::ThemePreset,
+    ) {
+        ui.heading(RichText::new("Theme & Visual Style").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.add_space(4.0);
+        ui.label(RichText::new("Choose a theme preset tailored for productivity, low-light environments, or high-contrast OLED displays.").size(12.0).color(AppTheme::TEXT_MUTED));
+        ui.add_space(14.0);
+
+        for preset in crate::theme::ThemePreset::all() {
+            let is_selected = *current_theme == *preset;
+            let border_color = if is_selected { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
+
+            egui::Frame::none()
+                .fill(if is_selected { AppTheme::BG_HOVER } else { AppTheme::BG_CARD })
+                .stroke(Stroke::new(if is_selected { 1.5_f32 } else { 1.0_f32 }, border_color))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(preset.display_name()).size(13.5).strong().color(if is_selected { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_PRIMARY }));
+                                if is_selected {
+                                    ui.label(RichText::new("✓ Active").size(11.0).strong().color(AppTheme::ACCENT_SUCCESS));
+                                }
+                            });
+                            ui.add_space(2.0);
+                            ui.label(RichText::new(preset.description()).size(11.5).color(AppTheme::TEXT_MUTED));
+                        });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if is_selected {
+                                ui.label(RichText::new("Applied").size(12.0).color(AppTheme::ACCENT_PRIMARY));
+                            } else if ui.button(RichText::new("Apply Theme").size(12.0)).clicked() {
+                                *current_theme = *preset;
+                                AppTheme::apply_preset(ctx, *preset);
+                                self.status_msg = Some((true, format!("Switched to {} theme.", preset.display_name())));
+                            }
+                        });
+                    });
+                });
+
+            ui.add_space(8.0);
         }
     }
 

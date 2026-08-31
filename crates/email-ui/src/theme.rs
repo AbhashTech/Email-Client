@@ -2,8 +2,55 @@ use egui::{
     epaint::Shadow, Color32, Margin, Rounding, Stroke, Visuals,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemePreset {
+    #[default]
+    DarkSlate,
+    CatppuccinMocha,
+    Nord,
+    SolarizedDark,
+    OledBlack,
+    LightClean,
+}
+
+impl ThemePreset {
+    pub fn all() -> &'static [ThemePreset] {
+        &[
+            ThemePreset::DarkSlate,
+            ThemePreset::CatppuccinMocha,
+            ThemePreset::Nord,
+            ThemePreset::SolarizedDark,
+            ThemePreset::OledBlack,
+            ThemePreset::LightClean,
+        ]
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ThemePreset::DarkSlate => "Dark Slate (Default)",
+            ThemePreset::CatppuccinMocha => "Catppuccin Mocha",
+            ThemePreset::Nord => "Nord Arctic",
+            ThemePreset::SolarizedDark => "Solarized Dark",
+            ThemePreset::OledBlack => "OLED Pure Black",
+            ThemePreset::LightClean => "Clean Daylight",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            ThemePreset::DarkSlate => "Modern dark slate with Google Blue accents",
+            ThemePreset::CatppuccinMocha => "Soothing pastel dark aesthetic with lavender accents",
+            ThemePreset::Nord => "Arctic bluish dark theme inspired by Nordic colors",
+            ThemePreset::SolarizedDark => "Precision low-contrast warm green-dark palette",
+            ThemePreset::OledBlack => "Deep #000000 true black for OLED screens and power saving",
+            ThemePreset::LightClean => "Bright, crisp daylight theme for well-lit environments",
+        }
+    }
+}
+
 pub struct AppTheme;
 
+#[allow(dead_code)]
 impl AppTheme {
     // Primary Color Palette (Modern Dark Slate / Charcoal)
     pub const BG_APP: Color32 = Color32::from_rgb(18, 20, 24);         // #121418 - Deep background
@@ -22,7 +69,6 @@ impl AppTheme {
     pub const ACCENT_WARNING: Color32 = Color32::from_rgb(251, 146, 60);    // Amber Orange #fb923c
     pub const ACCENT_DANGER: Color32 = Color32::from_rgb(234, 67, 53);     // Red #ea4335
 
-
     // Text Hierarchy
     pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(240, 242, 245);
     pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(165, 172, 185);
@@ -30,12 +76,76 @@ impl AppTheme {
     pub const BORDER_SUBTLE: Color32 = Color32::from_rgb(45, 50, 62);
 
     pub fn apply(ctx: &egui::Context) {
-        let mut visuals = Visuals::dark();
+        Self::apply_preset(ctx, ThemePreset::DarkSlate);
+    }
 
-        visuals.override_text_color = Some(Self::TEXT_PRIMARY);
-        visuals.panel_fill = Self::BG_APP;
-        visuals.window_fill = Self::BG_VIEW;
-        visuals.window_stroke = Stroke::new(1.0_f32, Self::BORDER_SUBTLE);
+    pub fn apply_preset(ctx: &egui::Context, preset: ThemePreset) {
+        let (mut visuals, bg_app, bg_view, bg_card, bg_hover, accent, accent_hover, border) = match preset {
+            ThemePreset::DarkSlate => (
+                Visuals::dark(),
+                Color32::from_rgb(18, 20, 24),
+                Color32::from_rgb(30, 34, 42),
+                Color32::from_rgb(34, 38, 48),
+                Color32::from_rgb(42, 47, 60),
+                Color32::from_rgb(66, 133, 244),
+                Color32::from_rgb(90, 150, 255),
+                Color32::from_rgb(45, 50, 62),
+            ),
+            ThemePreset::CatppuccinMocha => (
+                Visuals::dark(),
+                Color32::from_rgb(30, 30, 46),   // #1e1e2e
+                Color32::from_rgb(24, 24, 37),   // #181825
+                Color32::from_rgb(49, 50, 68),   // #313244
+                Color32::from_rgb(69, 71, 90),   // #45475a
+                Color32::from_rgb(137, 180, 250), // #89b4fa
+                Color32::from_rgb(180, 190, 254), // #b4befe
+                Color32::from_rgb(58, 60, 80),
+            ),
+            ThemePreset::Nord => (
+                Visuals::dark(),
+                Color32::from_rgb(46, 52, 64),   // #2e3440
+                Color32::from_rgb(59, 66, 82),   // #3b4252
+                Color32::from_rgb(67, 76, 94),   // #434c5e
+                Color32::from_rgb(76, 86, 106),  // #4c566a
+                Color32::from_rgb(136, 192, 208), // #88c0d0
+                Color32::from_rgb(129, 161, 193), // #81a1c1
+                Color32::from_rgb(76, 86, 106),
+            ),
+            ThemePreset::SolarizedDark => (
+                Visuals::dark(),
+                Color32::from_rgb(0, 43, 54),     // #002b36
+                Color32::from_rgb(7, 54, 66),     // #073642
+                Color32::from_rgb(14, 68, 82),
+                Color32::from_rgb(20, 80, 96),
+                Color32::from_rgb(42, 161, 152),  // #2aa198
+                Color32::from_rgb(38, 139, 210),  // #268bd2
+                Color32::from_rgb(15, 80, 96),
+            ),
+            ThemePreset::OledBlack => (
+                Visuals::dark(),
+                Color32::from_rgb(0, 0, 0),       // #000000
+                Color32::from_rgb(10, 10, 10),
+                Color32::from_rgb(20, 20, 20),
+                Color32::from_rgb(34, 34, 34),
+                Color32::from_rgb(59, 130, 246),  // #3b82f6
+                Color32::from_rgb(96, 165, 250),
+                Color32::from_rgb(38, 38, 38),
+            ),
+            ThemePreset::LightClean => (
+                Visuals::light(),
+                Color32::from_rgb(245, 247, 250), // #f5f7fa
+                Color32::from_rgb(255, 255, 255), // #ffffff
+                Color32::from_rgb(241, 245, 249), // #f1f5f9
+                Color32::from_rgb(226, 232, 240), // #e2e8f0
+                Color32::from_rgb(37, 99, 235),   // #2563eb
+                Color32::from_rgb(29, 78, 216),
+                Color32::from_rgb(203, 213, 225),
+            ),
+        };
+
+        visuals.panel_fill = bg_app;
+        visuals.window_fill = bg_view;
+        visuals.window_stroke = Stroke::new(1.0_f32, border);
         visuals.window_rounding = Rounding::same(10.0);
         visuals.window_shadow = Shadow {
             offset: egui::vec2(0.0, 6.0),
@@ -44,32 +154,32 @@ impl AppTheme {
             color: Color32::from_black_alpha(140),
         };
 
-
         // Widgets styling (Buttons, inputs, toggles)
-        visuals.widgets.noninteractive.bg_fill = Self::BG_CARD;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Self::BORDER_SUBTLE);
+        visuals.widgets.noninteractive.bg_fill = bg_card;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
         visuals.widgets.noninteractive.rounding = Rounding::same(6.0);
 
-        visuals.widgets.inactive.bg_fill = Self::BG_CARD;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Self::BORDER_SUBTLE);
+        visuals.widgets.inactive.bg_fill = bg_card;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, border);
         visuals.widgets.inactive.rounding = Rounding::same(6.0);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Self::TEXT_PRIMARY);
 
-        visuals.widgets.hovered.bg_fill = Self::BG_HOVER;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Self::ACCENT_PRIMARY);
+        visuals.widgets.hovered.bg_fill = bg_hover;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, accent);
         visuals.widgets.hovered.rounding = Rounding::same(6.0);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
 
-        visuals.widgets.active.bg_fill = Self::ACCENT_PRIMARY;
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, Self::ACCENT_HOVER);
+        visuals.widgets.active.bg_fill = accent;
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, accent_hover);
         visuals.widgets.active.rounding = Rounding::same(6.0);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
 
-        visuals.widgets.open.bg_fill = Self::BG_CARD;
+        visuals.widgets.open.bg_fill = bg_card;
         visuals.widgets.open.rounding = Rounding::same(6.0);
 
-        visuals.selection.bg_fill = Self::BG_SELECTED;
-        visuals.selection.stroke = Stroke::new(1.0_f32, Self::ACCENT_PRIMARY);
+        visuals.selection.bg_fill = if preset == ThemePreset::LightClean {
+            Color32::from_rgb(191, 219, 254)
+        } else {
+            Color32::from_rgb(38, 62, 105)
+        };
+        visuals.selection.stroke = Stroke::new(1.0_f32, accent);
 
         let mut style = (*ctx.style()).clone();
         style.visuals = visuals;

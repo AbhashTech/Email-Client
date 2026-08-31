@@ -17,6 +17,7 @@ pub enum PaletteAction {
     ReplyAll,
     Forward,
     FocusSearch,
+    SetTheme(crate::theme::ThemePreset),
 }
 
 #[allow(dead_code)]
