@@ -65,11 +65,12 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 💬 Conversation Threading View
+### 💬 Conversation Threading View & Per-Message Toolbars
 - **Smart Conversation Hierarchy**: Resolves and groups related email exchanges using `In-Reply-To`, `Message-ID`, and cleaned subject roots into unified chronological threads.
 - **Conversational Bubble Timeline**: Displays multi-message discussions as interactive bubble cards with sender avatar badges, timestamps, recipients, and connector lines.
-- **Expand / Collapse Accordion**: Intelligently expands the latest reply while keeping older history collapsible for clean and distraction-free reading.
-- **Per-Bubble Actions**: Quick access to reply, forward, view HTML body, and download attachments on any message within the conversation thread.
+- **Full-Card Clickable Accordion**: The entire header area of any thread card is interactive with hover feedback and a pointing hand cursor, allowing 1-click toggling anywhere to expand or collapse.
+- **Crisp Custom Vector Chevrons**: Features custom-rendered vector chevrons (`⌃` for Collapse, `⌄` for Expand) in styled pill badges with theme-aware accent colors.
+- **Per-Message Action Toolbar**: Every individual message in a thread provides its own complete inline action bar (`[↩ Reply]`, `[📝 Text]`, `[👥 Reply All]`, `[➡ Forward]`, `[✉ Read/Unread]`, `[💤 Snooze]`, `[📁 Move]`, `[📤 Export]`, `[🌐 Web View]`, `[↗ Browser]`, `[🗑 Delete]`) targeting that specific email in the thread.
 
 ---
 
@@ -103,12 +104,14 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 🪟 Window Controls & System Tray Integration
-- **Window Titlebar Controls**: Minimize (`[-]`), Maximize/Restore (`[🗖]`), and Close (`[✕]`) buttons built directly into the top navigation bar.
+### 🪟 Window Controls, Wayland/Hyprland & System Tray Integration
+- **Crisp Titlebar Controls**: Font-safe Minimize (`[−]`), Maximize/Restore (`[◻ / ⧉]`), and Close (`[×]`) buttons built directly into the top navigation bar.
+- **Wayland / Tiling WM Support**: Fully compatible with Wayland compositors (Hyprland, Sway, GNOME, KDE) with opaque frame buffers and clean surface teardown on exit.
 - **System Tray (StatusNotifierItem DBus)**:
   - Click tray icon to toggle application visibility.
   - Context menu actions: `Show/Hide Window`, `✉ Compose Email`, `🔄 Sync All Mail`, and `Quit`.
-- **Customizable Close Action (`Settings -> General & Storage`)**: Configure whether clicking window close (`✕`) minimizes to the system tray to continue background sync or completely quits the application.
+- **Customizable Close Action (`Settings -> General & Storage`)**: Choose between *Quit Application Completely* (recommended for Wayland & Tiling WMs) and *Minimize to System Tray* to keep background sync running.
+- **Zero GUI Thread Blocking**: Queue counters and background checks are cached and throttled to eliminate SQLite lock contention and ensure 60+ FPS responsiveness.
 
 ---
 
