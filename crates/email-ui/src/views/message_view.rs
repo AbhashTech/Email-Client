@@ -95,9 +95,7 @@ impl MessageViewPane {
             ui.cursor().top(),
             Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
         );
-        ui.add_space(12.0);
-
-        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             // 2. Email Subject Title
             let subj = if msg.subject.is_empty() {
                 "(No Subject)"
@@ -113,78 +111,75 @@ impl MessageViewPane {
             ui.add_space(12.0);
 
             // 3. Sender Header Card
-            let header_card_rect = ui.available_rect_before_wrap();
-            let (card_rect, _) = ui.allocate_exact_size(Vec2::new(header_card_rect.width(), 70.0), Sense::hover());
-            ui.painter().rect_filled(card_rect, Rounding::same(8.0), AppTheme::BG_CARD);
-            ui.painter().rect_stroke(card_rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
-
-
-            let mut card_ui = ui.new_child(egui::UiBuilder::new().max_rect(card_rect));
-            card_ui.horizontal(|ui| {
-                ui.add_space(12.0);
-
-                // Avatar Circle
-                let avatar_size = 40.0;
-                let (avatar_rect, _) = ui.allocate_exact_size(Vec2::new(avatar_size, avatar_size), Sense::hover());
-                let avatar_bg = AppTheme::avatar_color(msg.sender_display());
-                ui.painter().circle_filled(avatar_rect.center(), avatar_size / 2.0, avatar_bg);
-
-                let initials = AppTheme::get_initials(msg.sender_display());
-                ui.painter().text(
-                    avatar_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    initials,
-                    FontId::proportional(14.0),
-                    Color32::WHITE,
-                );
-
-                ui.add_space(10.0);
-
-                // Sender Info & Recipients
-                ui.vertical(|ui| {
-                    ui.add_space(10.0);
+            egui::Frame::none()
+                .fill(AppTheme::BG_CARD)
+                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+                .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(msg.sender_display())
-                                .strong()
-                                .size(13.5)
-                                .color(AppTheme::TEXT_PRIMARY),
-                        );
-                        if !msg.from_address.trim().is_empty() {
-                            ui.label(
-                                RichText::new(format!("<{}>", msg.from_address))
-                                    .size(12.0)
-                                    .color(AppTheme::TEXT_MUTED),
-                            );
-                        }
+                        // Avatar Circle
+                        let avatar_size = 40.0;
+                        let (avatar_rect, _) = ui.allocate_exact_size(Vec2::new(avatar_size, avatar_size), Sense::hover());
+                        let avatar_bg = AppTheme::avatar_color(msg.sender_display());
+                        ui.painter().circle_filled(avatar_rect.center(), avatar_size / 2.0, avatar_bg);
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(12.0);
-                            let full_date = msg.formatted_full_date();
-                            if !full_date.is_empty() {
+                        let initials = AppTheme::get_initials(msg.sender_display());
+                        ui.painter().text(
+                            avatar_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            initials,
+                            FontId::proportional(14.0),
+                            Color32::WHITE,
+                        );
+
+                        ui.add_space(10.0);
+
+                        // Sender Info & Recipients
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(full_date)
-                                        .size(11.5)
-                                        .color(AppTheme::TEXT_SECONDARY),
+                                    RichText::new(msg.sender_display())
+                                        .strong()
+                                        .size(13.5)
+                                        .color(AppTheme::TEXT_PRIMARY),
                                 );
-                            }
+                                if !msg.from_address.trim().is_empty() {
+                                    ui.label(
+                                        RichText::new(format!("<{}>", msg.from_address))
+                                            .size(12.0)
+                                            .color(AppTheme::TEXT_MUTED),
+                                    );
+                                }
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.add_space(4.0);
+                                    let full_date = msg.formatted_full_date();
+                                    if !full_date.is_empty() {
+                                        ui.label(
+                                            RichText::new(full_date)
+                                                .size(11.5)
+                                                .color(AppTheme::TEXT_SECONDARY),
+                                        );
+                                    }
+                                });
+                            });
+
+                            ui.add_space(2.0);
+
+                            // To / Cc line
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("to").size(11.5).color(AppTheme::TEXT_MUTED));
+                                let to_str = if msg.to_recipients.is_empty() {
+                                    "me".to_string()
+                                } else {
+                                    msg.to_recipients.iter().map(|r| r.display()).collect::<Vec<_>>().join(", ")
+                                };
+                                ui.label(RichText::new(to_str).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                            });
                         });
                     });
-
-                    ui.add_space(2.0);
-
-                    // To / Cc line
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("to").size(11.5).color(AppTheme::TEXT_MUTED));
-                        let to_str = if msg.to_recipients.is_empty() {
-                            "me".to_string()
-                        } else {
-                            msg.to_recipients.iter().map(|r| r.display()).collect::<Vec<_>>().join(", ")
-                        };
-                        ui.label(RichText::new(to_str).size(11.5).color(AppTheme::TEXT_SECONDARY));
-                    });
                 });
-            });
 
             ui.add_space(16.0);
 
@@ -211,10 +206,6 @@ impl MessageViewPane {
 
 
             // 5. Message Body Content
-            let body_container_rect = ui.available_rect_before_wrap();
-            let (_body_rect, _) = ui.allocate_exact_size(Vec2::new(body_container_rect.width(), 0.0), Sense::hover());
-
-            
             ui.scope(|ui| {
                 if let Some(ref html) = detail.body_html {
                     let blocks = parse_html_to_blocks(html);
@@ -274,8 +265,9 @@ impl MessageViewPane {
                                         src.clone()
                                     };
 
+                                    let available_img_width = ui.available_width().max(100.0);
                                     let img_widget = egui::Image::new(&resolved_uri)
-                                        .max_width(ui.available_width().min(680.0))
+                                        .max_width(available_img_width)
                                         .rounding(Rounding::same(6.0))
                                         .sense(Sense::click());
 
