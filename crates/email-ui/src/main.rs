@@ -103,10 +103,24 @@ fn main() -> Result<(), eframe::Error> {
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CloseButtonAction {
+    MinimizeToTray,
+    QuitApplication,
+}
+
+impl Default for CloseButtonAction {
+    fn default() -> Self {
+        Self::MinimizeToTray
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub custom_data_dir: Option<String>,
     pub active_theme: Option<String>,
+    #[serde(default)]
+    pub close_action: CloseButtonAction,
 }
 
 pub fn load_app_config() -> AppConfig {

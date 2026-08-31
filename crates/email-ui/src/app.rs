@@ -50,6 +50,8 @@ pub struct EmailApp {
     is_syncing: bool,
     show_sidebar: bool,
     show_message_list: bool,
+    is_window_visible: bool,
+    is_maximized: bool,
     last_scheduled_check: std::time::Instant,
     show_scheduled_modal: bool,
 
@@ -101,6 +103,8 @@ impl EmailApp {
             is_syncing: false,
             show_sidebar: true,
             show_message_list: true,
+            is_window_visible: true,
+            is_maximized: false,
             last_scheduled_check: std::time::Instant::now(),
             show_scheduled_modal: false,
             account_setup_view: AccountSetupView::new(),
@@ -194,7 +198,50 @@ impl EmailApp {
         }
     }
 
-    fn poll_background_events(&mut self) {
+    fn poll_background_events(&mut self, ctx: &egui::Context) {
+        // Poll Tray Actions
+        if let Some(ref mut tray) = self.tray {
+            while let Some(action) = tray.try_recv_action() {
+                match action {
+                    crate::tray::TrayAction::ToggleVisibility => {
+                        self.is_window_visible = !self.is_window_visible;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.is_window_visible));
+                        if self.is_window_visible {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        }
+                        tray.set_visible(self.is_window_visible);
+                    }
+                    crate::tray::TrayAction::ShowApp => {
+                        self.is_window_visible = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        tray.set_visible(true);
+                    }
+                    crate::tray::TrayAction::HideApp => {
+                        self.is_window_visible = false;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                        tray.set_visible(false);
+                    }
+                    crate::tray::TrayAction::ComposeEmail => {
+                        self.is_window_visible = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        tray.set_visible(true);
+                        self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+                    }
+                    crate::tray::TrayAction::SyncAll => {
+                        let _ = self.cmd_tx.send(SyncCommand::SyncAll);
+                    }
+                    crate::tray::TrayAction::Quit => {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        }
+
         // Poll Sync Events
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -249,6 +296,27 @@ impl EmailApp {
         }
 
         self.check_scheduled_queue();
+    }
+
+    pub fn handle_close_requested(&mut self, ctx: &egui::Context) {
+        let cfg = crate::load_app_config();
+        match cfg.close_action {
+            crate::CloseButtonAction::MinimizeToTray => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.is_window_visible = false;
+                if let Some(ref tray) = self.tray {
+                    tray.set_visible(false);
+                }
+                self.status_toast = Some((
+                    "AT-mail-rs minimized to system tray".to_string(),
+                    std::time::Instant::now(),
+                ));
+            }
+            crate::CloseButtonAction::QuitApplication => {
+                std::process::exit(0);
+            }
+        }
     }
 
     pub fn check_scheduled_queue(&mut self) {
@@ -594,7 +662,11 @@ impl EmailApp {
 
 impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_background_events();
+        self.poll_background_events(ctx);
+
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.handle_close_requested(ctx);
+        }
 
         if self.current_theme == crate::theme::ThemePreset::GruvboxAuto {
             AppTheme::apply_preset(ctx, crate::theme::ThemePreset::GruvboxAuto);
@@ -672,6 +744,25 @@ impl App for EmailApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Window Controls: Close (✕), Maximize/Restore (🗖), Minimize (➖)
+                    let close_btn = egui::Button::new(RichText::new("✕").size(11.0).color(Color32::WHITE))
+                        .fill(AppTheme::ACCENT_DANGER)
+                        .rounding(Rounding::same(4.0));
+                    if ui.add(close_btn).on_hover_text("Close window").clicked() {
+                        self.handle_close_requested(ctx);
+                    }
+
+                    if ui.button(RichText::new("🗖").size(11.0)).on_hover_text("Maximize / Restore window").clicked() {
+                        self.is_maximized = !self.is_maximized;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(self.is_maximized));
+                    }
+
+                    if ui.button(RichText::new("➖").size(11.0)).on_hover_text("Minimize window").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+
+                    ui.separator();
+
                     if self.is_syncing {
                         ui.spinner();
                     }

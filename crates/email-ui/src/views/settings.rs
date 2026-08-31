@@ -1,4 +1,4 @@
-use crate::{get_database_path, load_app_config, save_app_config};
+use crate::{get_database_path, load_app_config, save_app_config, CloseButtonAction};
 use crate::theme::{
     delete_custom_theme, get_config_dir, get_themes_dir, load_custom_themes, save_custom_theme,
     AppTheme,
@@ -1042,9 +1042,45 @@ impl SettingsView {
         ui.label("• SQLite WAL Mode: Enabled");
 
         ui.add_space(14.0);
+        ui.label(RichText::new("WINDOW & SYSTEM TRAY BEHAVIOR").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.add_space(6.0);
+
+        egui::Frame::none()
+            .fill(AppTheme::BG_CARD)
+            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("When clicking Window Close Button (✕):").strong().color(AppTheme::TEXT_PRIMARY));
+                ui.add_space(6.0);
+
+                let mut cfg = load_app_config();
+                let prev_action = cfg.close_action;
+
+                ui.radio_value(
+                    &mut cfg.close_action,
+                    CloseButtonAction::MinimizeToTray,
+                    "Minimize / Hide to System Tray (Keep running in background)",
+                );
+                ui.radio_value(
+                    &mut cfg.close_action,
+                    CloseButtonAction::QuitApplication,
+                    "Quit Application Completely",
+                );
+
+                if cfg.close_action != prev_action {
+                    if let Err(e) = save_app_config(&cfg) {
+                        self.status_msg = Some((false, format!("Failed to save close action preference: {}", e)));
+                    } else {
+                        self.status_msg = Some((true, "Saved window close button preference.".to_string()));
+                    }
+                }
+            });
+
+        ui.add_space(14.0);
         ui.label(RichText::new("SYSTEM TRAY").size(11.0).strong().color(AppTheme::TEXT_MUTED));
         ui.add_space(4.0);
-        ui.label("• StatusNotifierItem DBus tray enabled with live unread badge updates.");
+        ui.label("• StatusNotifierItem DBus tray enabled with live unread badge, quick compose, and show/hide window toggle.");
     }
 
     fn show_backup_tab(
