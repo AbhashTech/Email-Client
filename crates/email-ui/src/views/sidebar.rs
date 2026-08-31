@@ -31,7 +31,7 @@ impl SidebarView {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::hover());
-                ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::ACCENT_PRIMARY);
+                ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::accent(ui));
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -41,8 +41,8 @@ impl SidebarView {
                 );
 
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("AT-mail-rs").strong().size(15.0).color(AppTheme::TEXT_PRIMARY));
-                    ui.label(RichText::new("Fast Native Email").size(10.0).color(AppTheme::TEXT_MUTED));
+                    ui.label(RichText::new("AT-mail-rs").strong().size(15.0).color(AppTheme::text_primary(ui)));
+                    ui.label(RichText::new("Fast Native Email").size(10.0).color(AppTheme::text_muted(ui)));
                 });
 
 
@@ -57,7 +57,7 @@ impl SidebarView {
             ui.painter().hline(
                 ui.available_rect_before_wrap().x_range(),
                 ui.cursor().top(),
-                Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+                Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
             );
             ui.add_space(8.0);
 
@@ -69,7 +69,7 @@ impl SidebarView {
                         RichText::new("SMART VIEWS")
                             .size(10.5)
                             .strong()
-                            .color(AppTheme::TEXT_MUTED),
+                            .color(AppTheme::text_muted(ui)),
                     );
                     ui.add_space(4.0);
 
@@ -123,7 +123,7 @@ impl SidebarView {
                     ui.painter().hline(
                         ui.available_rect_before_wrap().x_range(),
                         ui.cursor().top(),
-                        Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+                        Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
                     );
                     ui.add_space(8.0);
 
@@ -132,14 +132,14 @@ impl SidebarView {
                         RichText::new("ACCOUNTS")
                             .size(10.5)
                             .strong()
-                            .color(AppTheme::TEXT_MUTED),
+                            .color(AppTheme::text_muted(ui)),
                     );
                     ui.add_space(4.0);
 
                     if accounts.is_empty() {
                         ui.vertical_centered(|ui| {
                             ui.add_space(8.0);
-                            ui.label(RichText::new("No accounts setup").size(12.0).color(AppTheme::TEXT_MUTED));
+                            ui.label(RichText::new("No accounts setup").size(12.0).color(AppTheme::text_muted(ui)));
                             if ui.button(RichText::new("+ Add Account").size(11.0)).clicked() {
                                 *on_add_account = true;
                             }
@@ -151,7 +151,7 @@ impl SidebarView {
                                 RichText::new(header_text)
                                     .size(12.5)
                                     .strong()
-                                    .color(AppTheme::TEXT_PRIMARY),
+                                    .color(AppTheme::text_primary(ui)),
                             )
                             .id_salt(format!("acc_collapse_{}", account.id))
                             .default_open(true)
@@ -199,7 +199,7 @@ impl SidebarView {
                                             );
                                         }
                                     } else {
-                                        ui.label(RichText::new("No folders discovered").size(11.0).color(AppTheme::TEXT_MUTED));
+                                        ui.label(RichText::new("No folders discovered").size(11.0).color(AppTheme::text_muted(ui)));
                                     }
                                 });
                             });
@@ -211,7 +211,7 @@ impl SidebarView {
                     ui.painter().hline(
                         ui.available_rect_before_wrap().x_range(),
                         ui.cursor().top(),
-                        Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+                        Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
                     );
                     ui.add_space(8.0);
 
@@ -220,7 +220,7 @@ impl SidebarView {
                         RichText::new("MANAGEMENT")
                             .size(10.5)
                             .strong()
-                            .color(AppTheme::TEXT_MUTED),
+                            .color(AppTheme::text_muted(ui)),
                     );
                     ui.add_space(6.0);
 
@@ -268,11 +268,11 @@ impl SidebarView {
 
         // Draw background with clean inner margins
         let bg = if is_dnd_hovered {
-            Color32::from_rgb(35, 65, 105)
+            AppTheme::accent_hover(ui)
         } else if is_selected {
-            AppTheme::BG_SELECTED
+            AppTheme::bg_selected(ui)
         } else if response.hovered() {
-            AppTheme::BG_HOVER
+            AppTheme::bg_hover(ui)
         } else {
             Color32::TRANSPARENT
         };
@@ -280,14 +280,14 @@ impl SidebarView {
         ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
 
         if is_dnd_hovered {
-            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY));
+            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.5_f32, AppTheme::accent(ui)));
         } else if is_selected {
             // Accent bar on the left with vertical margin
             let indicator = Rect::from_min_size(
                 rect.min + Vec2::new(3.0, 6.0),
                 Vec2::new(3.5, height - 12.0),
             );
-            ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::ACCENT_PRIMARY);
+            ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::accent(ui));
         }
 
         // Content layout
@@ -298,13 +298,13 @@ impl SidebarView {
             ui.add_space(6.0);
 
             let text_color = if is_dnd_hovered {
-                Color32::from_rgb(180, 220, 255)
+                Color32::WHITE
             } else if is_selected {
                 Color32::WHITE
             } else if unread > 0 {
-                AppTheme::TEXT_PRIMARY
+                AppTheme::text_primary(ui)
             } else {
-                AppTheme::TEXT_SECONDARY
+                AppTheme::text_secondary(ui)
             };
 
             let text_style = if is_dnd_hovered {
@@ -331,9 +331,9 @@ impl SidebarView {
                         Sense::hover(),
                     );
                     let badge_bg = if is_selected {
-                        AppTheme::ACCENT_PRIMARY
+                        AppTheme::accent(ui)
                     } else {
-                        AppTheme::BG_CARD
+                        AppTheme::bg_card(ui)
                     };
                     ui.painter().rect_filled(badge_rect, Rounding::same(9.0), badge_bg);
                     ui.painter().text(
@@ -341,7 +341,7 @@ impl SidebarView {
                         egui::Align2::CENTER_CENTER,
                         badge_text,
                         egui::FontId::proportional(10.5),
-                        if is_selected { Color32::WHITE } else { AppTheme::TEXT_PRIMARY },
+                        if is_selected { Color32::WHITE } else { AppTheme::text_primary(ui) },
                     );
                 });
             }

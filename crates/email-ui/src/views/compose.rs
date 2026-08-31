@@ -327,7 +327,7 @@ impl ComposeView {
                                     .strong()
                                     .color(Color32::WHITE),
                             )
-                            .fill(AppTheme::ACCENT_PRIMARY)
+                            .fill(AppTheme::accent(ui))
                             .rounding(Rounding::same(6.0));
 
                             if ui.add(top_send_btn).clicked() {
@@ -338,7 +338,7 @@ impl ComposeView {
 
                             // Send Later Dropdown
                             egui::ComboBox::from_id_salt("send_later_combo")
-                                .selected_text(RichText::new("⏰ Send Later").size(12.0).color(AppTheme::ACCENT_PRIMARY))
+                                .selected_text(RichText::new("⏰ Send Later").size(12.0).color(AppTheme::accent(ui)))
                                 .show_ui(ui, |ui| {
                                     let now = Utc::now();
                                     if ui.button("⚡ In 15 minutes").clicked() {
@@ -414,7 +414,7 @@ impl ComposeView {
                         // 2. Account & Security Options (Row 2)
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
-                            ui.label(RichText::new("From:").size(12.0).strong().color(AppTheme::TEXT_MUTED));
+                            ui.label(RichText::new("From:").size(12.0).strong().color(AppTheme::text_muted(ui)));
                             let current_account = accounts.iter().find(|a| a.id == self.selected_account_id).unwrap_or(&accounts[0]);
                             let prev_account_id = self.selected_account_id.clone();
                             egui::ComboBox::from_id_salt("compose_from_combo")
@@ -446,7 +446,7 @@ impl ComposeView {
 
                         if self.show_custom_schedule_dialog {
                             ui.add_space(4.0);
-                            egui::Frame::none().fill(AppTheme::BG_CARD).stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY)).rounding(Rounding::same(6.0)).inner_margin(8.0).show(ui, |ui| {
+                            egui::Frame::none().fill(AppTheme::bg_card(ui)).stroke(Stroke::new(1.0_f32, AppTheme::accent(ui))).rounding(Rounding::same(6.0)).inner_margin(8.0).show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new("Schedule Send in:").strong().size(12.0));
                                     ui.add(egui::DragValue::new(&mut self.custom_schedule_hours).range(0..=720).prefix("Hours: "));
@@ -471,7 +471,7 @@ impl ComposeView {
 
                         // 3. To, Cc, Bcc
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("To:").size(12.5).color(AppTheme::TEXT_MUTED));
+                            ui.label(RichText::new("To:").size(12.5).color(AppTheme::text_muted(ui)));
                             ui.add(egui::TextEdit::singleline(&mut self.to_input).desired_width(ui.available_width() - 80.0));
                             if ui.button(if self.show_cc_bcc { "Hide Cc" } else { "Cc/Bcc" }).clicked() { self.show_cc_bcc = !self.show_cc_bcc; }
                         });
@@ -486,7 +486,7 @@ impl ComposeView {
                         if !self.attachments.is_empty() {
                             ui.add_space(4.0);
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new("📎 Attachments:").size(12.0).strong().color(AppTheme::TEXT_MUTED));
+                                ui.label(RichText::new("📎 Attachments:").size(12.0).strong().color(AppTheme::text_muted(ui)));
                                 let mut to_remove = None;
                                 for (idx, att) in self.attachments.iter().enumerate() {
                                     let size_kb = att.size_bytes as f64 / 1024.0;
@@ -496,8 +496,8 @@ impl ComposeView {
                                         format!("{:.1} KB", size_kb)
                                     };
                                     egui::Frame::none()
-                                        .fill(AppTheme::BG_CARD)
-                                        .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                        .fill(AppTheme::bg_card(ui))
+                                        .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
                                         .rounding(Rounding::same(6.0))
                                         .inner_margin(egui::Margin::symmetric(6.0, 3.0))
                                         .show(ui, |ui| {
@@ -546,15 +546,15 @@ impl ComposeView {
                         });
 
                         egui::Frame::none()
-                            .fill(AppTheme::BG_CARD)
-                            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                            .fill(AppTheme::bg_card(ui))
+                            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
                             .rounding(Rounding::same(6.0))
                             .inner_margin(egui::Margin::symmetric(10.0, 7.0))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     if let Some(sig) = attached_sig {
-                                        ui.label(RichText::new("🖋️ Attached Signature:").size(12.0).strong().color(AppTheme::ACCENT_PRIMARY));
-                                        ui.label(RichText::new(&sig.name).size(12.0).strong().color(AppTheme::TEXT_PRIMARY));
+                                        ui.label(RichText::new("🖋️ Attached Signature:").size(12.0).strong().color(AppTheme::accent(ui)));
+                                        ui.label(RichText::new(&sig.name).size(12.0).strong().color(AppTheme::text_primary(ui)));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             if ui.small_button(RichText::new("× Detach").color(AppTheme::ACCENT_DANGER)).on_hover_text("Do not attach signature to this email").clicked() {
@@ -574,7 +574,7 @@ impl ComposeView {
                                                 });
                                         });
                                     } else {
-                                        ui.label(RichText::new("🖋️ No signature attached").size(12.0).color(AppTheme::TEXT_MUTED));
+                                        ui.label(RichText::new("🖋️ No signature attached").size(12.0).color(AppTheme::text_muted(ui)));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             egui::ComboBox::from_id_salt("compose_sig_add_combo")
                                                 .selected_text("+ Attach Signature")
@@ -594,7 +594,7 @@ impl ComposeView {
                                     let preview = email_html::html_to_plain_text(&sig.content_html);
                                     if !preview.trim().is_empty() {
                                         ui.add_space(3.0);
-                                        ui.label(RichText::new(format!("--\n{}", preview.trim())).size(11.0).color(AppTheme::TEXT_MUTED));
+                                        ui.label(RichText::new(format!("--\n{}", preview.trim())).size(11.0).color(AppTheme::text_muted(ui)));
                                     }
                                 }
                             });
@@ -603,13 +603,13 @@ impl ComposeView {
                         if let Some(ref mut quote) = self.reply_quote {
                             ui.add_space(8.0);
                             egui::Frame::none()
-                                .fill(AppTheme::BG_VIEW)
-                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                .fill(AppTheme::bg_view(ui))
+                                .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
                                 .rounding(Rounding::same(6.0))
                                 .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new("💬 Quoted Original Message:").size(12.0).strong().color(AppTheme::TEXT_SECONDARY));
+                                        ui.label(RichText::new("💬 Quoted Original Message:").size(12.0).strong().color(AppTheme::text_secondary(ui)));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             let toggle_label = if self.show_quoted_text { "Hide Quote" } else { "Show / Edit Quote" };
@@ -623,7 +623,7 @@ impl ComposeView {
                                     if self.show_quoted_text {
                                         ui.add_space(4.0);
                                         if self.include_quote {
-                                            ui.label(RichText::new("Original email text below will be quoted in your reply (you can edit or trim it):").size(11.0).color(AppTheme::TEXT_MUTED));
+                                            ui.label(RichText::new("Original email text below will be quoted in your reply (you can edit or trim it):").size(11.0).color(AppTheme::text_muted(ui)));
                                         } else {
                                             ui.label(RichText::new("Original email text (will NOT be included in outgoing email):").size(11.0).color(AppTheme::ACCENT_WARNING));
                                         }
@@ -632,7 +632,7 @@ impl ComposeView {
                                             egui::TextEdit::multiline(quote)
                                                 .desired_rows(6)
                                                 .desired_width(f32::INFINITY)
-                                                .text_color(if self.include_quote { AppTheme::TEXT_MUTED } else { AppTheme::BORDER_SUBTLE })
+                                                .text_color(if self.include_quote { AppTheme::text_muted(ui) } else { AppTheme::border_subtle(ui) })
                                         );
                                     }
                                 });

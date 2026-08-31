@@ -805,7 +805,7 @@ impl App for EmailApp {
         if !self.is_window_visible {
             // Render an opaque background so Wayland compositor receives a valid committed frame buffer
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(AppTheme::BG_APP))
+                .frame(egui::Frame::none().fill(AppTheme::bg_app_ctx(ctx)))
                 .show(ctx, |_ui| {});
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
             return;
@@ -842,7 +842,7 @@ impl App for EmailApp {
                         .strong()
                         .color(Color32::WHITE),
                 )
-                .fill(AppTheme::ACCENT_PRIMARY)
+                .fill(AppTheme::accent(ui))
                 .rounding(Rounding::same(6.0));
 
                 if ui.add(compose_btn).clicked() {
@@ -855,7 +855,7 @@ impl App for EmailApp {
 
                 if self.scheduled_count > 0 {
                     let sched_text = format!("⏰ {} Scheduled", self.scheduled_count);
-                    if ui.button(RichText::new(sched_text).size(12.5).color(AppTheme::ACCENT_PRIMARY)).on_hover_text("View scheduled outbox queue").clicked() {
+                    if ui.button(RichText::new(sched_text).size(12.5).color(AppTheme::accent(ui))).on_hover_text("View scheduled outbox queue").clicked() {
                         self.show_scheduled_modal = true;
                     }
                 }
@@ -919,7 +919,7 @@ impl App for EmailApp {
                     let max_btn = egui::Button::new(
                         RichText::new(max_label)
                             .size(12.0)
-                            .color(AppTheme::TEXT_PRIMARY),
+                            .color(AppTheme::text_primary(ui)),
                     )
                     .min_size(egui::vec2(22.0, 18.0))
                     .rounding(Rounding::same(4.0));
@@ -933,7 +933,7 @@ impl App for EmailApp {
                         RichText::new("−")
                             .size(15.0)
                             .strong()
-                            .color(AppTheme::TEXT_PRIMARY),
+                            .color(AppTheme::text_primary(ui)),
                     )
                     .min_size(egui::vec2(22.0, 18.0))
                     .rounding(Rounding::same(4.0));
@@ -950,7 +950,7 @@ impl App for EmailApp {
                     ui.label(
                         RichText::new(&self.status_text)
                             .size(11.5)
-                            .color(AppTheme::TEXT_MUTED),
+                            .color(AppTheme::text_muted(ui)),
                     );
                 });
             });
@@ -972,17 +972,17 @@ impl App for EmailApp {
                     RichText::new("⚡ Native Rust Engine")
                         .size(11.0)
                         .strong()
-                        .color(AppTheme::ACCENT_PRIMARY),
+                        .color(AppTheme::accent(ui)),
                 );
                 ui.label(
                     RichText::new("•")
                         .size(11.0)
-                        .color(AppTheme::TEXT_MUTED),
+                        .color(AppTheme::text_muted(ui)),
                 );
                 ui.label(
                     RichText::new("Memory: ~38 MB (Zero Chromium/Electron)")
                         .size(11.0)
-                        .color(AppTheme::TEXT_SECONDARY),
+                        .color(AppTheme::text_secondary(ui)),
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -990,7 +990,7 @@ impl App for EmailApp {
                     ui.label(
                         RichText::new(format!("{} Total Unread: {}", status_dot, unread_count))
                             .size(11.0)
-                            .color(AppTheme::TEXT_SECONDARY),
+                            .color(AppTheme::text_secondary(ui)),
                     );
                 });
             });
@@ -1514,8 +1514,8 @@ impl App for EmailApp {
                     } else {
                         for item in scheduled_list {
                             egui::Frame::none()
-                                .fill(AppTheme::BG_CARD)
-                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                .fill(AppTheme::bg_card(ui))
+                                .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
                                 .rounding(Rounding::same(6.0))
                                 .inner_margin(8.0)
                                 .show(ui, |ui| {
@@ -1524,8 +1524,8 @@ impl App for EmailApp {
                                             let dt = chrono::DateTime::from_timestamp(item.send_at_timestamp, 0)
                                                 .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
                                                 .unwrap_or_default();
-                                            ui.label(RichText::new(format!("Subject: {}", item.draft.subject)).strong().color(AppTheme::TEXT_PRIMARY));
-                                            ui.label(RichText::new(format!("To: {} • Scheduled for: {}", item.draft.to.iter().map(|r| r.email.as_str()).collect::<Vec<_>>().join(", "), dt)).size(11.0).color(AppTheme::TEXT_MUTED));
+                                            ui.label(RichText::new(format!("Subject: {}", item.draft.subject)).strong().color(AppTheme::text_primary(ui)));
+                                            ui.label(RichText::new(format!("To: {} • Scheduled for: {}", item.draft.to.iter().map(|r| r.email.as_str()).collect::<Vec<_>>().join(", "), dt)).size(11.0).color(AppTheme::text_muted(ui)));
                                         });
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1707,8 +1707,8 @@ impl App for EmailApp {
                     .order(egui::Order::Foreground)
                     .show(ctx, |ui| {
                         egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(26, 34, 52))
-                            .stroke(egui::Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY))
+                            .fill(AppTheme::bg_card(ui))
+                            .stroke(egui::Stroke::new(1.5_f32, AppTheme::accent(ui)))
                             .rounding(egui::Rounding::same(8.0))
                             .inner_margin(egui::Margin::symmetric(18.0, 10.0))
                             .show(ui, |ui| {
@@ -1717,7 +1717,7 @@ impl App for EmailApp {
                                     ui.label(
                                         RichText::new(format!("Sending email in {:.1}s...", remaining))
                                             .size(13.0)
-                                            .color(egui::Color32::WHITE),
+                                            .color(AppTheme::text_primary(ui)),
                                     );
                                     ui.add_space(8.0);
                                     if ui.button(RichText::new("↩ Undo Send").size(12.0).strong().color(AppTheme::ACCENT_WARNING)).clicked() {
@@ -1750,14 +1750,14 @@ impl App for EmailApp {
                     egui::Pos2::new(screen_rect.right() - toast_width - 24.0, screen_rect.bottom() - 60.0),
                     egui::Vec2::new(toast_width, 38.0),
                 );
-                toast_ui.rect_filled(toast_rect, egui::Rounding::same(8.0), egui::Color32::from_rgb(20, 30, 48));
-                toast_ui.rect_stroke(toast_rect, egui::Rounding::same(8.0), egui::Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
+                toast_ui.rect_filled(toast_rect, egui::Rounding::same(8.0), AppTheme::bg_card_ctx(ctx));
+                toast_ui.rect_stroke(toast_rect, egui::Rounding::same(8.0), egui::Stroke::new(1.0_f32, AppTheme::accent_ctx(ctx)));
                 toast_ui.text(
                     toast_rect.left_center() + egui::Vec2::new(14.0, 0.0),
                     egui::Align2::LEFT_CENTER,
                     format!("✓ {}", toast_text),
                     egui::FontId::proportional(12.0),
-                    egui::Color32::WHITE,
+                    AppTheme::text_primary_ctx(ctx),
                 );
                 ctx.request_repaint_after(std::time::Duration::from_millis(500));
             }

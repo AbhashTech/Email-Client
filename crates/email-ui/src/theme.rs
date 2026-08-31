@@ -272,11 +272,128 @@ impl AppTheme {
     pub const ACCENT_WARNING: Color32 = Color32::from_rgb(251, 146, 60);    // Amber Orange #fb923c
     pub const ACCENT_DANGER: Color32 = Color32::from_rgb(234, 67, 53);     // Red #ea4335
 
-    // Text Hierarchy
-    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(240, 242, 245);
-    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(165, 172, 185);
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(115, 122, 135);
-    pub const BORDER_SUBTLE: Color32 = Color32::from_rgb(45, 50, 62);
+    // Dynamic theme accessors
+    #[inline]
+    pub fn bg_app(ui: &egui::Ui) -> Color32 {
+        ui.visuals().panel_fill
+    }
+
+    #[inline]
+    pub fn bg_app_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.panel_fill
+    }
+
+    #[inline]
+    pub fn bg_list(ui: &egui::Ui) -> Color32 {
+        ui.visuals().panel_fill
+    }
+
+    #[inline]
+    pub fn bg_view(ui: &egui::Ui) -> Color32 {
+        ui.visuals().window_fill
+    }
+
+    #[inline]
+    pub fn bg_view_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.window_fill
+    }
+
+    #[inline]
+    pub fn bg_card(ui: &egui::Ui) -> Color32 {
+        ui.visuals().widgets.noninteractive.bg_fill
+    }
+
+    #[inline]
+    pub fn bg_card_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.widgets.noninteractive.bg_fill
+    }
+
+    #[inline]
+    pub fn bg_hover(ui: &egui::Ui) -> Color32 {
+        ui.visuals().widgets.hovered.bg_fill
+    }
+
+    #[inline]
+    pub fn bg_selected(ui: &egui::Ui) -> Color32 {
+        ui.visuals().selection.bg_fill
+    }
+
+    #[inline]
+    pub fn bg_unread_row(ui: &egui::Ui) -> Color32 {
+        if ui.visuals().dark_mode {
+            Color32::from_rgb(28, 33, 44)
+        } else {
+            let base = ui.visuals().panel_fill;
+            Color32::from_rgb(
+                base.r().saturating_sub(10),
+                base.g().saturating_sub(10),
+                base.b().saturating_sub(15),
+            )
+        }
+    }
+
+    #[inline]
+    pub fn accent(ui: &egui::Ui) -> Color32 {
+        ui.visuals().widgets.active.bg_fill
+    }
+
+    #[inline]
+    pub fn accent_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.widgets.active.bg_fill
+    }
+
+    #[inline]
+    pub fn accent_hover(ui: &egui::Ui) -> Color32 {
+        ui.visuals().widgets.active.bg_stroke.color
+    }
+
+    #[inline]
+    pub fn border_subtle(ui: &egui::Ui) -> Color32 {
+        ui.visuals().widgets.noninteractive.bg_stroke.color
+    }
+
+    #[inline]
+    pub fn border_subtle_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.widgets.noninteractive.bg_stroke.color
+    }
+
+    #[inline]
+    pub fn text_primary(ui: &egui::Ui) -> Color32 {
+        ui.visuals().text_color()
+    }
+
+    #[inline]
+    pub fn text_primary_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.text_color()
+    }
+
+    #[inline]
+    pub fn text_secondary(ui: &egui::Ui) -> Color32 {
+        if ui.visuals().dark_mode {
+            Color32::from_rgb(165, 172, 185)
+        } else {
+            Color32::from_rgb(100, 105, 115)
+        }
+    }
+
+    #[inline]
+    pub fn text_secondary_ctx(ctx: &egui::Context) -> Color32 {
+        if ctx.style().visuals.dark_mode {
+            Color32::from_rgb(165, 172, 185)
+        } else {
+            Color32::from_rgb(100, 105, 115)
+        }
+    }
+
+    #[inline]
+    pub fn text_muted(ui: &egui::Ui) -> Color32 {
+        ui.visuals().weak_text_color()
+    }
+
+    #[inline]
+    pub fn text_muted_ctx(ctx: &egui::Context) -> Color32 {
+        ctx.style().visuals.weak_text_color()
+    }
 
     pub fn apply(ctx: &egui::Context) {
         Self::apply_preset(ctx, ThemePreset::DarkSlate);
@@ -361,10 +478,10 @@ impl AppTheme {
             ),
             ThemePreset::GruvboxLight => (
                 Visuals::light(),
-                Color32::from_rgb(251, 241, 199), // #fbf1c7 Gruvbox Light 0
-                Color32::from_rgb(242, 229, 188), // #f2e5bc Gruvbox Light 1
-                Color32::from_rgb(235, 219, 178), // #ebdbb2 Gruvbox Light 2
-                Color32::from_rgb(213, 196, 161), // #d5c4a1 Gruvbox Light 3
+                Color32::from_rgb(251, 241, 199), // #fbf1c7 Gruvbox Light 0 (bg_app)
+                Color32::from_rgb(242, 229, 188), // #f2e5bc Gruvbox Light 1 (bg_view)
+                Color32::from_rgb(235, 219, 178), // #ebdbb2 Gruvbox Light 2 (bg_card)
+                Color32::from_rgb(213, 196, 161), // #d5c4a1 Gruvbox Light 3 (bg_hover)
                 Color32::from_rgb(175, 58, 3),    // #af3a03 Gruvbox Rust/Orange
                 Color32::from_rgb(215, 153, 33),  // #d79921 Gruvbox Dark Yellow
                 Color32::from_rgb(213, 196, 161),
@@ -431,8 +548,21 @@ impl AppTheme {
         visuals.widgets.open.bg_fill = bg_card;
         visuals.widgets.open.rounding = Rounding::same(6.0);
 
+        if is_light {
+            visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(40, 40, 40);
+            visuals.widgets.inactive.fg_stroke.color = Color32::from_rgb(55, 50, 45);
+            visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(20, 20, 20);
+            visuals.widgets.active.fg_stroke.color = Color32::WHITE;
+            visuals.widgets.open.fg_stroke.color = Color32::from_rgb(40, 40, 40);
+            visuals.extreme_bg_color = bg_app;
+        }
+
         visuals.selection.bg_fill = if is_light {
-            Color32::from_rgb(235, 219, 178)
+            if active_preset == ThemePreset::GruvboxLight {
+                Color32::from_rgb(235, 219, 178)
+            } else {
+                Color32::from_rgb(219, 234, 254)
+            }
         } else {
             Color32::from_rgb(38, 62, 105)
         };
@@ -464,6 +594,8 @@ impl AppTheme {
         let accent = Color32::from_rgb(theme.accent_primary[0], theme.accent_primary[1], theme.accent_primary[2]);
         let accent_hover = Color32::from_rgb(theme.accent_hover[0], theme.accent_hover[1], theme.accent_hover[2]);
         let border = Color32::from_rgb(theme.border[0], theme.border[1], theme.border[2]);
+        let text_primary = Color32::from_rgb(theme.text_primary[0], theme.text_primary[1], theme.text_primary[2]);
+        let text_secondary = Color32::from_rgb(theme.text_secondary[0], theme.text_secondary[1], theme.text_secondary[2]);
 
         visuals.panel_fill = bg_app;
         visuals.window_fill = bg_view;
@@ -482,25 +614,31 @@ impl AppTheme {
 
         visuals.widgets.noninteractive.bg_fill = bg_card;
         visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.noninteractive.fg_stroke.color = text_primary;
         visuals.widgets.noninteractive.rounding = Rounding::same(6.0);
 
         visuals.widgets.inactive.bg_fill = bg_card;
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.inactive.fg_stroke.color = text_secondary;
         visuals.widgets.inactive.rounding = Rounding::same(6.0);
 
         visuals.widgets.hovered.bg_fill = bg_hover;
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, accent);
+        visuals.widgets.hovered.fg_stroke.color = text_primary;
         visuals.widgets.hovered.rounding = Rounding::same(6.0);
 
         visuals.widgets.active.bg_fill = accent;
         visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, accent_hover);
+        visuals.widgets.active.fg_stroke.color = Color32::WHITE;
         visuals.widgets.active.rounding = Rounding::same(6.0);
 
         visuals.widgets.open.bg_fill = bg_card;
+        visuals.widgets.open.fg_stroke.color = text_primary;
         visuals.widgets.open.rounding = Rounding::same(6.0);
 
         visuals.selection.bg_fill = bg_selected;
         visuals.selection.stroke = Stroke::new(1.0_f32, accent);
+        visuals.extreme_bg_color = bg_app;
 
         let mut style = (*ctx.style()).clone();
         style.visuals = visuals;

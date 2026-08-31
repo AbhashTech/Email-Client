@@ -32,11 +32,11 @@ impl MessageViewPane {
                 ui.add_space(140.0);
                 ui.label(RichText::new("📬").size(48.0));
                 ui.add_space(12.0);
-                ui.heading(RichText::new("No Email Selected").size(18.0).color(AppTheme::TEXT_SECONDARY));
+                ui.heading(RichText::new("No Email Selected").size(18.0).color(AppTheme::text_secondary(ui)));
                 ui.label(
                     RichText::new("Choose a conversation from the message list to view its contents")
                         .size(13.0)
-                        .color(AppTheme::TEXT_MUTED),
+                        .color(AppTheme::text_muted(ui)),
                 );
             });
             return;
@@ -53,7 +53,7 @@ impl MessageViewPane {
 
             if msg.is_draft {
                 let edit_btn = egui::Button::new(RichText::new("✏ Edit Draft").strong().size(12.0).color(Color32::WHITE))
-                    .fill(AppTheme::ACCENT_PRIMARY)
+                    .fill(AppTheme::accent(ui))
                     .rounding(Rounding::same(6.0));
                 if ui.add(edit_btn).clicked() {
                     *on_edit_draft = Some(latest_detail.clone());
@@ -85,7 +85,7 @@ impl MessageViewPane {
                 .show_ui(ui, |ui| {
                     let now = chrono::Utc::now();
                     if msg.is_snoozed() {
-                        if ui.button(RichText::new("⏰ Unsnooze (Move to Inbox)").size(12.0).color(AppTheme::ACCENT_PRIMARY)).clicked() {
+                        if ui.button(RichText::new("⏰ Unsnooze (Move to Inbox)").size(12.0).color(AppTheme::accent(ui))).clicked() {
                             *on_snooze = Some((msg.id.clone(), None));
                             *status_toast = Some("Message unsnoozed and returned to Inbox".to_string());
                         }
@@ -254,7 +254,7 @@ impl MessageViewPane {
                     let dt = chrono::DateTime::from_timestamp(snooze_ts, 0).unwrap_or_default();
                     let formatted = dt.format("%a, %b %e at %I:%M %p").to_string();
                     egui::Frame::none()
-                        .fill(AppTheme::BG_CARD)
+                        .fill(AppTheme::bg_card(ui))
                         .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_WARNING))
                         .rounding(Rounding::same(6.0))
                         .inner_margin(egui::Margin::symmetric(10.0, 6.0))
@@ -282,13 +282,13 @@ impl MessageViewPane {
                     RichText::new(subj)
                         .size(20.0)
                         .strong()
-                        .color(AppTheme::TEXT_PRIMARY),
+                        .color(AppTheme::text_primary(ui)),
                 );
                 if thread_messages.len() > 1 {
                     ui.label(
                         RichText::new(format!("💬 {} messages in thread", thread_messages.len()))
                             .size(12.0)
-                            .color(AppTheme::ACCENT_PRIMARY)
+                            .color(AppTheme::accent(ui))
                             .strong(),
                     );
                 }
@@ -304,13 +304,13 @@ impl MessageViewPane {
 
                 let is_hoverable = thread_messages.len() > 1;
                 let card_stroke = if is_expanded {
-                    Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY)
+                    Stroke::new(1.0_f32, AppTheme::accent(ui))
                 } else {
-                    Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE)
+                    Stroke::new(1.0_f32, AppTheme::border_subtle(ui))
                 };
 
                 egui::Frame::none()
-                    .fill(if is_expanded { AppTheme::BG_CARD } else { AppTheme::BG_VIEW })
+                    .fill(if is_expanded { AppTheme::bg_card(ui) } else { AppTheme::bg_view(ui) })
                     .stroke(card_stroke)
                     .rounding(Rounding::same(8.0))
                     .inner_margin(egui::Margin::symmetric(14.0, 10.0))
@@ -342,28 +342,28 @@ impl MessageViewPane {
                                         RichText::new(item_msg.sender_display())
                                             .strong()
                                             .size(13.0)
-                                            .color(AppTheme::TEXT_PRIMARY),
+                                            .color(AppTheme::text_primary(ui)),
                                     );
                                     if !item_msg.from_address.trim().is_empty() {
                                         ui.label(
                                             RichText::new(format!("<{}>", item_msg.from_address))
                                                 .size(11.5)
-                                                .color(AppTheme::TEXT_MUTED),
+                                                .color(AppTheme::text_muted(ui)),
                                         );
                                     }
                                 });
 
                                 if !is_expanded {
-                                    ui.label(RichText::new(&item_msg.snippet).size(12.0).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new(&item_msg.snippet).size(12.0).color(AppTheme::text_muted(ui)));
                                 } else {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new("to").size(11.0).color(AppTheme::TEXT_MUTED));
+                                        ui.label(RichText::new("to").size(11.0).color(AppTheme::text_muted(ui)));
                                         let to_str = if item_msg.to_recipients.is_empty() {
                                             "me".to_string()
                                         } else {
                                             item_msg.to_recipients.iter().map(|r| r.display()).collect::<Vec<_>>().join(", ")
                                         };
-                                        ui.label(RichText::new(to_str).size(11.0).color(AppTheme::TEXT_SECONDARY));
+                                        ui.label(RichText::new(to_str).size(11.0).color(AppTheme::text_secondary(ui)));
                                     });
                                 }
                             });
@@ -371,20 +371,20 @@ impl MessageViewPane {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if is_hoverable {
                                     let badge_bg = if is_expanded {
-                                        AppTheme::BG_HOVER
+                                        AppTheme::bg_hover(ui)
                                     } else {
-                                        AppTheme::ACCENT_PRIMARY.linear_multiply(0.18)
+                                        AppTheme::accent(ui).linear_multiply(0.18)
                                     };
                                     let badge_fg = if is_expanded {
-                                        AppTheme::TEXT_SECONDARY
+                                        AppTheme::text_secondary(ui)
                                     } else {
-                                        AppTheme::ACCENT_PRIMARY
+                                        AppTheme::accent(ui)
                                     };
                                     let action_label = if is_expanded { "Collapse" } else { "Expand" };
 
                                     let badge_resp = egui::Frame::none()
                                         .fill(badge_bg)
-                                        .stroke(Stroke::new(1.0_f32, if is_expanded { AppTheme::BORDER_SUBTLE } else { AppTheme::ACCENT_PRIMARY }))
+                                        .stroke(Stroke::new(1.0_f32, if is_expanded { AppTheme::border_subtle(ui) } else { AppTheme::accent(ui) }))
                                         .rounding(Rounding::same(5.0))
                                         .inner_margin(egui::Margin::symmetric(8.0, 4.0))
                                         .show(ui, |ui| {
@@ -415,7 +415,7 @@ impl MessageViewPane {
                                     ui.label(
                                         RichText::new(full_date)
                                             .size(11.5)
-                                            .color(AppTheme::TEXT_SECONDARY),
+                                            .color(AppTheme::text_secondary(ui)),
                                     );
                                 }
                             });
@@ -629,7 +629,7 @@ impl MessageViewPane {
                                     ui.add_space(20.0);
                                     ui.spinner();
                                     ui.add_space(6.0);
-                                    ui.label(RichText::new("Downloading message...").size(12.0).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new("Downloading message...").size(12.0).color(AppTheme::text_muted(ui)));
                                 });
                                 let _ = cmd_tx.send(SyncCommand::FetchBody {
                                     account_id: item_msg.account_id.clone(),
@@ -646,7 +646,7 @@ impl MessageViewPane {
                 if !is_last {
                     ui.add_space(4.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("│").size(12.0).color(AppTheme::BORDER_SUBTLE));
+                        ui.label(RichText::new("│").size(12.0).color(AppTheme::border_subtle(ui)));
                     });
                     ui.add_space(4.0);
                 }
@@ -680,23 +680,23 @@ impl MessageViewPane {
 
         if is_encrypted {
             egui::Frame::none()
-                .fill(Color32::from_rgb(18, 30, 49))
-                .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY))
+                .fill(AppTheme::bg_card(ui))
+                .stroke(Stroke::new(1.0_f32, AppTheme::accent(ui)))
                 .rounding(Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(14.0, 10.0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("🔒").size(16.0));
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("End-to-End Encrypted Message (PGP / OpenPGP)").strong().size(13.0).color(Color32::WHITE));
-                            ui.label(RichText::new("This message was encrypted with a public key. Decrypted automatically for your account.").size(11.5).color(AppTheme::TEXT_SECONDARY));
+                            ui.label(RichText::new("End-to-End Encrypted Message (PGP / OpenPGP)").strong().size(13.0).color(AppTheme::text_primary(ui)));
+                            ui.label(RichText::new("This message was encrypted with a public key. Decrypted automatically for your account.").size(11.5).color(AppTheme::text_secondary(ui)));
                         });
                     });
                 });
             ui.add_space(8.0);
         } else if is_signed {
             egui::Frame::none()
-                .fill(Color32::from_rgb(20, 38, 28))
+                .fill(AppTheme::bg_card(ui))
                 .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_SUCCESS))
                 .rounding(Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(14.0, 10.0))
@@ -705,7 +705,7 @@ impl MessageViewPane {
                         ui.label(RichText::new("✍").size(16.0));
                         ui.vertical(|ui| {
                             ui.label(RichText::new("Cryptographically Signed Message (PGP)").strong().size(13.0).color(AppTheme::ACCENT_SUCCESS));
-                            ui.label(RichText::new("Sender identity and content integrity verified with RSA-SHA256 signature.").size(11.5).color(AppTheme::TEXT_SECONDARY));
+                            ui.label(RichText::new("Sender identity and content integrity verified with RSA-SHA256 signature.").size(11.5).color(AppTheme::text_secondary(ui)));
                         });
                     });
                 });
@@ -984,7 +984,7 @@ impl MessageViewPane {
             } else if let Some(ref plain) = detail.body_plain {
                 ui.label(RichText::new(plain).size(13.5).line_height(Some(20.0)));
             } else {
-                ui.label(RichText::new("(Empty email body)").italics().color(AppTheme::TEXT_MUTED));
+                ui.label(RichText::new("(Empty email body)").italics().color(AppTheme::text_muted(ui)));
             }
         });
     }
@@ -1002,7 +1002,7 @@ impl MessageViewPane {
         ui.painter().hline(
             ui.available_rect_before_wrap().x_range(),
             ui.cursor().top(),
-            Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+            Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
         );
         ui.add_space(14.0);
 
@@ -1010,7 +1010,7 @@ impl MessageViewPane {
             RichText::new(format!("📎 ATTACHMENTS ({}) — Click to Save", detail.attachments.len()))
                 .size(11.5)
                 .strong()
-                .color(AppTheme::TEXT_MUTED),
+                .color(AppTheme::text_muted(ui)),
         );
         ui.add_space(12.0);
 
@@ -1056,15 +1056,15 @@ impl MessageViewPane {
                 }
 
                 let bg = if resp.hovered() {
-                    AppTheme::BG_HOVER
+                    AppTheme::bg_hover(ui)
                 } else {
-                    AppTheme::BG_CARD
+                    AppTheme::bg_card(ui)
                 };
 
                 let border_color = if resp.hovered() {
-                    AppTheme::ACCENT_PRIMARY
+                    AppTheme::accent(ui)
                 } else {
-                    AppTheme::BORDER_SUBTLE
+                    AppTheme::border_subtle(ui)
                 };
 
                 ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
@@ -1081,11 +1081,11 @@ impl MessageViewPane {
                         } else {
                             att.filename.clone()
                         };
-                        ui.label(RichText::new(truncated_fn).size(12.0).strong().color(AppTheme::TEXT_PRIMARY));
+                        ui.label(RichText::new(truncated_fn).size(12.0).strong().color(AppTheme::text_primary(ui)));
                         ui.add_space(2.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&size_text).size(10.5).color(AppTheme::TEXT_MUTED));
-                            ui.label(RichText::new("• 💾 Save").size(10.5).color(AppTheme::ACCENT_PRIMARY));
+                            ui.label(RichText::new(&size_text).size(10.5).color(AppTheme::text_muted(ui)));
+                            ui.label(RichText::new("• 💾 Save").size(10.5).color(AppTheme::accent(ui)));
                         });
                     });
                 });
@@ -1109,12 +1109,12 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
                 let default_color = if is_light_canvas {
                     Color32::from_rgb(33, 37, 41)
                 } else {
-                    AppTheme::TEXT_PRIMARY
+                    AppTheme::text_primary(ui)
                 };
                 let default_secondary = if is_light_canvas {
                     Color32::from_rgb(108, 117, 125)
                 } else {
-                    AppTheme::TEXT_SECONDARY
+                    AppTheme::text_secondary(ui)
                 };
 
                 let col = if let Some((r, g, b)) = span.text_color {

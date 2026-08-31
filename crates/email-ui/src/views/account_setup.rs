@@ -157,7 +157,7 @@ impl AccountSetupView {
                     ui.label(
                         RichText::new("Credentials stored securely in native OS Keyring (Zero plaintext in database)")
                             .size(12.0)
-                            .color(AppTheme::ACCENT_HOVER),
+                            .color(AppTheme::accent_hover(ui)),
                     );
                 });
                 ui.add_space(8.0);
@@ -165,7 +165,7 @@ impl AccountSetupView {
                 // Provider Presets (only show if adding new)
                 if !is_editing {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Presets:").size(12.0).color(AppTheme::TEXT_MUTED));
+                        ui.label(RichText::new("Presets:").size(12.0).color(AppTheme::text_muted(ui)));
                         if ui.button("🔴 Gmail").clicked() {
                             self.imap_host = "imap.gmail.com".to_string();
                             self.imap_port = 993;
@@ -201,22 +201,22 @@ impl AccountSetupView {
                     .num_columns(2)
                     .spacing([12.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(RichText::new("Display Name:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("Display Name:").size(12.5).color(AppTheme::text_secondary(ui)));
                         ui.text_edit_singleline(&mut self.name);
                         ui.end_row();
 
-                        ui.label(RichText::new("Email Address:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("Email Address:").size(12.5).color(AppTheme::text_secondary(ui)));
                         let email_response = ui.text_edit_singleline(&mut self.email);
                         if email_response.lost_focus() && self.imap_host.is_empty() {
                             self.auto_fill_presets(&self.email.clone());
                         }
                         ui.end_row();
 
-                        ui.label(RichText::new("Password / App Key:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("Password / App Key:").size(12.5).color(AppTheme::text_secondary(ui)));
                         ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
                         ui.end_row();
 
-                        ui.label(RichText::new("IMAP Server:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("IMAP Server:").size(12.5).color(AppTheme::text_secondary(ui)));
                         ui.horizontal(|ui| {
                             ui.text_edit_singleline(&mut self.imap_host);
                             ui.label("Port:");
@@ -224,7 +224,7 @@ impl AccountSetupView {
                         });
                         ui.end_row();
 
-                        ui.label(RichText::new("SMTP Server:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("SMTP Server:").size(12.5).color(AppTheme::text_secondary(ui)));
                         ui.horizontal(|ui| {
                             ui.text_edit_singleline(&mut self.smtp_host);
                             ui.label("Port:");
@@ -232,7 +232,7 @@ impl AccountSetupView {
                         });
                         ui.end_row();
 
-                        ui.label(RichText::new("Sync Window:").size(12.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new("Sync Window:").size(12.5).color(AppTheme::text_secondary(ui)));
                         ui.horizontal(|ui| {
                             let is_custom = matches!(self.sync_window, SyncWindow::Custom(_));
                             let selected_text = self.sync_window.label();
@@ -249,31 +249,17 @@ impl AccountSetupView {
                                     if ui.selectable_label(self.sync_window == SyncWindow::Days30, SyncWindow::Days30.label()).clicked() {
                                         self.sync_window = SyncWindow::Days30;
                                     }
-                                    if ui.selectable_label(self.sync_window == SyncWindow::Days45, SyncWindow::Days45.label()).clicked() {
-                                        self.sync_window = SyncWindow::Days45;
-                                    }
-                                    if ui.selectable_label(self.sync_window == SyncWindow::Days60, SyncWindow::Days60.label()).clicked() {
-                                        self.sync_window = SyncWindow::Days60;
-                                    }
-                                    if ui.selectable_label(self.sync_window == SyncWindow::Days90, SyncWindow::Days90.label()).clicked() {
-                                        self.sync_window = SyncWindow::Days90;
-                                    }
-                                    if ui.selectable_label(self.sync_window == SyncWindow::Days365, SyncWindow::Days365.label()).clicked() {
-                                        self.sync_window = SyncWindow::Days365;
-                                    }
-                                    if ui.selectable_label(is_custom, "Custom Days...").clicked() {
-                                        self.sync_window = SyncWindow::Custom(self.custom_sync_days);
-                                    }
                                     if ui.selectable_label(self.sync_window == SyncWindow::All, SyncWindow::All.label()).clicked() {
                                         self.sync_window = SyncWindow::All;
                                     }
+                                    if ui.selectable_label(is_custom, "Custom days...").clicked() {
+                                        self.sync_window = SyncWindow::Custom(60);
+                                    }
                                 });
 
-                            if is_custom {
-                                ui.add_space(6.0);
-                                if ui.add(egui::DragValue::new(&mut self.custom_sync_days).range(1..=3650).speed(1).suffix(" days")).changed() {
-                                    self.sync_window = SyncWindow::Custom(self.custom_sync_days);
-                                }
+                            if let SyncWindow::Custom(ref mut days) = self.sync_window {
+                                ui.label("Days:");
+                                ui.add(egui::DragValue::new(days).range(1..=3650));
                             }
                         });
                         ui.end_row();
@@ -285,7 +271,7 @@ impl AccountSetupView {
 
                 // Selective Folder Sync Checklist
                 if !self.discovered_folders.is_empty() {
-                    ui.label(RichText::new("SELECT FOLDERS TO SYNC:").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+                    ui.label(RichText::new("SELECT FOLDERS TO SYNC:").size(11.0).strong().color(AppTheme::text_muted(ui)));
                     ui.add_space(4.0);
 
                     egui::ScrollArea::vertical()
@@ -345,7 +331,7 @@ impl AccountSetupView {
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(AppTheme::ACCENT_PRIMARY)
+                        .fill(AppTheme::accent(ui))
                         .rounding(Rounding::same(6.0));
 
                         if ui.add(save_btn).clicked() {

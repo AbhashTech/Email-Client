@@ -143,8 +143,8 @@ impl CommandPalette {
             .anchor(egui::Align2::CENTER_CENTER, Vec2::new(0.0, -60.0))
             .frame(
                 egui::Frame::window(&ctx.style())
-                    .fill(Color32::from_rgb(18, 22, 34))
-                    .stroke(Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY))
+                    .fill(AppTheme::bg_view_ctx(ctx))
+                    .stroke(Stroke::new(1.5_f32, AppTheme::accent_ctx(ctx)))
                     .rounding(Rounding::same(12.0))
                     .inner_margin(16.0),
             );
@@ -176,7 +176,7 @@ impl CommandPalette {
                     ui.add_space(40.0);
                     ui.label(
                         RichText::new("No matching commands found")
-                            .color(AppTheme::TEXT_MUTED)
+                            .color(AppTheme::text_muted(ui))
                             .size(13.0),
                     );
                 });
@@ -188,7 +188,7 @@ impl CommandPalette {
                         for (idx, item) in self.filtered.iter().enumerate() {
                             let is_selected = idx == self.selected_idx;
                             let bg_color = if is_selected {
-                                AppTheme::ACCENT_PRIMARY.linear_multiply(0.3)
+                                AppTheme::accent(ui).linear_multiply(0.3)
                             } else {
                                 Color32::TRANSPARENT
                             };
@@ -203,9 +203,9 @@ impl CommandPalette {
                                     ui.label(
                                         RichText::new(&item.category)
                                             .size(10.5)
-                                            .color(AppTheme::TEXT_MUTED),
+                                            .color(AppTheme::text_muted(ui)),
                                     );
-                                    ui.label(RichText::new("•").size(10.0).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new("•").size(10.0).color(AppTheme::text_muted(ui)));
                                     ui.label(
                                         RichText::new(&item.title)
                                             .size(13.0)
@@ -213,7 +213,7 @@ impl CommandPalette {
                                             .color(if is_selected {
                                                 Color32::WHITE
                                             } else {
-                                                AppTheme::TEXT_PRIMARY
+                                                AppTheme::text_primary(ui)
                                             }),
                                     );
 
@@ -224,7 +224,7 @@ impl CommandPalette {
                                                 ui.label(
                                                     RichText::new(sc)
                                                         .size(11.0)
-                                                        .color(AppTheme::ACCENT_PRIMARY),
+                                                        .color(AppTheme::accent(ui)),
                                                 );
                                             },
                                         );

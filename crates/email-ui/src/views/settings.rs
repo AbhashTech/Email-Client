@@ -184,7 +184,7 @@ impl SettingsView {
                 ui.painter().hline(
                     ui.available_rect_before_wrap().x_range(),
                     ui.cursor().top(),
-                    Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+                    Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
                 );
                 ui.add_space(8.0);
 
@@ -244,11 +244,12 @@ impl SettingsView {
         let text = if is_active {
             RichText::new(title).strong().size(13.0).color(Color32::WHITE)
         } else {
-            RichText::new(title).size(13.0).color(AppTheme::TEXT_SECONDARY)
+            RichText::new(title).size(13.0).color(AppTheme::text_primary(ui))
         };
 
         let btn = egui::Button::new(text)
-            .fill(if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD })
+            .fill(if is_active { AppTheme::accent(ui) } else { AppTheme::bg_card(ui) })
+            .stroke(Stroke::new(1.0_f32, if is_active { AppTheme::accent(ui) } else { AppTheme::border_subtle(ui) }))
             .rounding(Rounding::same(6.0));
 
         let resp = ui.add(btn);
@@ -273,7 +274,7 @@ impl SettingsView {
         on_data_changed: &mut bool,
     ) {
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("Configured Email Accounts").size(16.0).color(AppTheme::TEXT_PRIMARY));
+            ui.heading(RichText::new("Configured Email Accounts").size(16.0).color(AppTheme::text_primary(ui)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let add_btn = egui::Button::new(
                     RichText::new("➕ Add New Account")
@@ -281,7 +282,7 @@ impl SettingsView {
                         .strong()
                         .color(Color32::WHITE),
                 )
-                .fill(AppTheme::ACCENT_PRIMARY)
+                .fill(AppTheme::accent(ui))
                 .rounding(Rounding::same(6.0));
 
                 if ui.add(add_btn).clicked() {
@@ -295,7 +296,7 @@ impl SettingsView {
         if accounts.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(30.0);
-                ui.label(RichText::new("No email accounts configured yet.").size(13.0).color(AppTheme::TEXT_MUTED));
+                ui.label(RichText::new("No email accounts configured yet.").size(13.0).color(AppTheme::text_muted(ui)));
                 ui.add_space(6.0);
                 if ui.button("➕ Set Up Your First Account").clicked() {
                     *on_add_account = true;
@@ -312,8 +313,8 @@ impl SettingsView {
 
             let card_rect = ui.available_rect_before_wrap();
             let (rect, _) = ui.allocate_exact_size(Vec2::new(card_rect.width(), card_height.max(130.0)), egui::Sense::hover());
-            ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::BG_CARD);
-            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+            ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::bg_card(ui));
+            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::border_subtle(ui)));
 
             let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             child_ui.horizontal(|ui| {
@@ -335,8 +336,8 @@ impl SettingsView {
                 ui.vertical(|ui| {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&acc.name).size(14.0).strong().color(AppTheme::TEXT_PRIMARY));
-                        ui.label(RichText::new(format!("<{}>", acc.email)).size(12.0).color(AppTheme::TEXT_MUTED));
+                        ui.label(RichText::new(&acc.name).size(14.0).strong().color(AppTheme::text_primary(ui)));
+                        ui.label(RichText::new(format!("<{}>", acc.email)).size(12.0).color(AppTheme::text_muted(ui)));
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(12.0);
@@ -356,15 +357,15 @@ impl SettingsView {
 
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("IMAP: {}:{} • SMTP: {}:{}", acc.imap_host, acc.imap_port, acc.smtp_host, acc.smtp_port)).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                        ui.label(RichText::new(format!("IMAP: {}:{} • SMTP: {}:{}", acc.imap_host, acc.imap_port, acc.smtp_host, acc.smtp_port)).size(11.5).color(AppTheme::text_secondary(ui)));
                         ui.add_space(12.0);
-                        ui.label(RichText::new(format!("Sync Window: {}", acc.sync_days_window.label())).size(11.5).color(AppTheme::ACCENT_HOVER));
+                        ui.label(RichText::new(format!("Sync Window: {}", acc.sync_days_window.label())).size(11.5).color(AppTheme::accent_hover(ui)));
                     });
 
                     // Interactive Folder Sync Selector
                     if let Some(folders) = folders_opt {
                         ui.add_space(8.0);
-                        ui.label(RichText::new("CHOOSE FOLDERS TO SYNC:").size(10.5).strong().color(AppTheme::TEXT_MUTED));
+                        ui.label(RichText::new("CHOOSE FOLDERS TO SYNC:").size(10.5).strong().color(AppTheme::text_muted(ui)));
                         ui.add_space(4.0);
 
                         egui::Grid::new(format!("folders_grid_{}", acc.id))
@@ -400,17 +401,17 @@ impl SettingsView {
         storage: &Storage,
         on_data_changed: &mut bool,
     ) {
-        ui.heading(RichText::new("Email Signatures").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.heading(RichText::new("Email Signatures").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(8.0);
 
         // Signatures List
         if signatures.is_empty() {
-            ui.label(RichText::new("No signatures created yet.").size(12.5).color(AppTheme::TEXT_MUTED));
+            ui.label(RichText::new("No signatures created yet.").size(12.5).color(AppTheme::text_muted(ui)));
         } else {
             for sig in signatures.iter() {
                 ui.horizontal(|ui| {
                     let default_tag = if sig.is_default { " [Default]" } else { "" };
-                    ui.label(RichText::new(format!("📝 {}{}", sig.name, default_tag)).strong().size(13.0));
+                    ui.label(RichText::new(format!("📝 {}{}", sig.name, default_tag)).strong().size(13.0).color(AppTheme::text_primary(ui)));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
@@ -431,7 +432,7 @@ impl SettingsView {
                         }
                     });
                 });
-                ui.label(RichText::new(email_html::html_to_plain_text(&sig.content_html)).italics().size(11.5).color(AppTheme::TEXT_MUTED));
+                ui.label(RichText::new(email_html::html_to_plain_text(&sig.content_html)).italics().size(11.5).color(AppTheme::text_muted(ui)));
                 ui.separator();
             }
         }
@@ -442,7 +443,7 @@ impl SettingsView {
         } else {
             "CREATE NEW SIGNATURE".to_string()
         };
-        ui.label(RichText::new(sig_heading).size(11.0).strong().color(if self.editing_sig_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_MUTED }));
+        ui.label(RichText::new(sig_heading).size(11.0).strong().color(if self.editing_sig_id.is_some() { AppTheme::accent(ui) } else { AppTheme::text_muted(ui) }));
         ui.add_space(6.0);
 
         egui::Grid::new("new_signature_grid")
@@ -471,7 +472,7 @@ impl SettingsView {
             };
 
             let btn = egui::Button::new(RichText::new(save_btn_label).strong())
-                .fill(if self.editing_sig_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD });
+                .fill(if self.editing_sig_id.is_some() { AppTheme::accent(ui) } else { AppTheme::bg_card(ui) });
 
             if ui.add(btn).clicked() {
                 if self.new_sig_name.trim().is_empty() {
@@ -527,17 +528,17 @@ impl SettingsView {
         storage: &Storage,
         on_data_changed: &mut bool,
     ) {
-        ui.heading(RichText::new("Quick Templates & Snippets").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.heading(RichText::new("Quick Templates & Snippets").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(8.0);
 
         if templates.is_empty() {
-            ui.label(RichText::new("No templates created yet.").size(12.5).color(AppTheme::TEXT_MUTED));
+            ui.label(RichText::new("No templates created yet.").size(12.5).color(AppTheme::text_muted(ui)));
         } else {
             for tpl in templates.iter() {
                 ui.horizontal(|ui| {
                     let sc = tpl.shortcut.as_deref().unwrap_or("");
                     let shortcut_tag = if !sc.is_empty() { format!(" ({})", sc) } else { "".to_string() };
-                    ui.label(RichText::new(format!("📋 {}{}", tpl.name, shortcut_tag)).strong().size(13.0));
+                    ui.label(RichText::new(format!("📋 {}{}", tpl.name, shortcut_tag)).strong().size(13.0).color(AppTheme::text_primary(ui)));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
@@ -558,7 +559,7 @@ impl SettingsView {
                         }
                     });
                 });
-                ui.label(RichText::new(&tpl.body_template).italics().size(11.5).color(AppTheme::TEXT_MUTED));
+                ui.label(RichText::new(&tpl.body_template).italics().size(11.5).color(AppTheme::text_muted(ui)));
                 ui.separator();
             }
         }
@@ -569,7 +570,7 @@ impl SettingsView {
         } else {
             "CREATE NEW TEMPLATE".to_string()
         };
-        ui.label(RichText::new(tpl_heading).size(11.0).strong().color(if self.editing_tpl_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_MUTED }));
+        ui.label(RichText::new(tpl_heading).size(11.0).strong().color(if self.editing_tpl_id.is_some() { AppTheme::accent(ui) } else { AppTheme::text_muted(ui) }));
         ui.add_space(6.0);
 
         egui::Grid::new("new_tpl_grid")
@@ -602,7 +603,7 @@ impl SettingsView {
             };
 
             let btn = egui::Button::new(RichText::new(save_btn_label).strong())
-                .fill(if self.editing_tpl_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD });
+                .fill(if self.editing_tpl_id.is_some() { AppTheme::accent(ui) } else { AppTheme::bg_card(ui) });
 
             if ui.add(btn).clicked() {
                 if self.new_tpl_name.trim().is_empty() {
@@ -663,20 +664,20 @@ impl SettingsView {
         current_theme: &mut crate::theme::ThemePreset,
         storage: &Storage,
     ) {
-        ui.heading(RichText::new("Theme & Visual Style").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.heading(RichText::new("Theme & Visual Style").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(4.0);
-        ui.label(RichText::new("Choose a built-in theme preset or design your own custom theme saved to OS configuration.").size(12.0).color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("Choose a built-in theme preset or design your own custom theme saved to OS configuration.").size(12.0).color(AppTheme::text_muted(ui)));
         ui.add_space(14.0);
 
-        ui.label(RichText::new("BUILT-IN PRESETS").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("BUILT-IN PRESETS").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(6.0);
 
         for preset in crate::theme::ThemePreset::all() {
             let is_selected = self.active_custom_theme_id.is_none() && *current_theme == *preset;
-            let border_color = if is_selected { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
+            let border_color = if is_selected { AppTheme::accent(ui) } else { AppTheme::border_subtle(ui) };
 
             egui::Frame::none()
-                .fill(if is_selected { AppTheme::BG_HOVER } else { AppTheme::BG_CARD })
+                .fill(if is_selected { AppTheme::bg_hover(ui) } else { AppTheme::bg_card(ui) })
                 .stroke(Stroke::new(if is_selected { 1.5_f32 } else { 1.0_f32 }, border_color))
                 .rounding(Rounding::same(8.0))
                 .inner_margin(12.0)
@@ -684,18 +685,18 @@ impl SettingsView {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(preset.display_name()).size(13.5).strong().color(if is_selected { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_PRIMARY }));
+                                ui.label(RichText::new(preset.display_name()).size(13.5).strong().color(if is_selected { AppTheme::accent(ui) } else { AppTheme::text_primary(ui) }));
                                 if is_selected {
                                     ui.label(RichText::new("✓ Active").size(11.0).strong().color(AppTheme::ACCENT_SUCCESS));
                                 }
                             });
                             ui.add_space(2.0);
-                            ui.label(RichText::new(preset.description()).size(11.5).color(AppTheme::TEXT_MUTED));
+                            ui.label(RichText::new(preset.description()).size(11.5).color(AppTheme::text_muted(ui)));
                         });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if is_selected {
-                                ui.label(RichText::new("Applied").size(12.0).color(AppTheme::ACCENT_PRIMARY));
+                                ui.label(RichText::new("Applied").size(12.0).color(AppTheme::accent(ui)));
                             } else {
                                 let btn = ui.button(RichText::new("Apply Theme").size(12.0));
                                 if btn.hovered() {
@@ -720,7 +721,7 @@ impl SettingsView {
         // Custom Themes Section
         ui.add_space(14.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("CUSTOM USER THEMES").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+            ui.label(RichText::new("CUSTOM USER THEMES").size(11.0).strong().color(AppTheme::text_muted(ui)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(RichText::new("🔄 Refresh Themes").size(11.0)).clicked() {
                     self.custom_themes = load_custom_themes();
@@ -731,14 +732,14 @@ impl SettingsView {
         ui.add_space(6.0);
 
         if self.custom_themes.is_empty() {
-            ui.label(RichText::new("No custom themes created yet. Use the editor below to create one!").size(12.0).italics().color(AppTheme::TEXT_MUTED));
+            ui.label(RichText::new("No custom themes created yet. Use the editor below to create one!").size(12.0).italics().color(AppTheme::text_muted(ui)));
         } else {
             for ct in self.custom_themes.clone() {
                 let is_active = self.active_custom_theme_id.as_deref() == Some(&ct.id);
-                let border_color = if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
+                let border_color = if is_active { AppTheme::accent(ui) } else { AppTheme::border_subtle(ui) };
 
                 egui::Frame::none()
-                    .fill(if is_active { AppTheme::BG_HOVER } else { AppTheme::BG_CARD })
+                    .fill(if is_active { AppTheme::bg_hover(ui) } else { AppTheme::bg_card(ui) })
                     .stroke(Stroke::new(if is_active { 1.5_f32 } else { 1.0_f32 }, border_color))
                     .rounding(Rounding::same(8.0))
                     .inner_margin(12.0)
@@ -752,18 +753,18 @@ impl SettingsView {
                             ui.painter().rect_filled(r1, Rounding::ZERO, Color32::from_rgb(ct.bg_app[0], ct.bg_app[1], ct.bg_app[2]));
                             ui.painter().rect_filled(r2, Rounding::ZERO, Color32::from_rgb(ct.bg_card[0], ct.bg_card[1], ct.bg_card[2]));
                             ui.painter().rect_filled(r3, Rounding::ZERO, Color32::from_rgb(ct.accent_primary[0], ct.accent_primary[1], ct.accent_primary[2]));
-                            ui.painter().rect_stroke(swatch_rect, Rounding::same(4.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+                            ui.painter().rect_stroke(swatch_rect, Rounding::same(4.0), Stroke::new(1.0_f32, AppTheme::border_subtle(ui)));
 
                             ui.add_space(8.0);
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&ct.name).size(13.5).strong().color(if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_PRIMARY }));
+                                    ui.label(RichText::new(&ct.name).size(13.5).strong().color(if is_active { AppTheme::accent(ui) } else { AppTheme::text_primary(ui) }));
                                     if is_active {
                                         ui.label(RichText::new("✓ Active").size(11.0).strong().color(AppTheme::ACCENT_SUCCESS));
                                     }
                                 });
                                 ui.add_space(2.0);
-                                ui.label(RichText::new(format!("{} • Saved to OS Config ({}.json)", ct.description, ct.id)).size(11.0).color(AppTheme::TEXT_MUTED));
+                                ui.label(RichText::new(format!("{} • Saved to OS Config ({}.json)", ct.description, ct.id)).size(11.0).color(AppTheme::text_muted(ui)));
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -773,7 +774,7 @@ impl SettingsView {
                                     self.status_msg = Some((true, format!("Deleted custom theme '{}'.", ct.name)));
                                 }
                                 if is_active {
-                                    ui.label(RichText::new("Applied").size(12.0).color(AppTheme::ACCENT_PRIMARY));
+                                    ui.label(RichText::new("Applied").size(12.0).color(AppTheme::accent(ui)));
                                 } else {
                                     let btn = ui.button(RichText::new("Apply Theme").size(12.0));
                                     if btn.hovered() {
@@ -797,14 +798,14 @@ impl SettingsView {
 
         // Custom Theme Creator Form
         ui.add_space(16.0);
-        ui.label(RichText::new("🎨 CREATE / CUSTOMIZE THEME").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("🎨 CREATE / CUSTOMIZE THEME").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
-        ui.label(RichText::new(format!("Themes are saved as individual JSON files in: {}", get_themes_dir().display())).size(11.0).color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new(format!("Themes are saved as individual JSON files in: {}", get_themes_dir().display())).size(11.0).color(AppTheme::text_muted(ui)));
         ui.add_space(8.0);
 
         // Quick Starter Presets
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Start with palette:").size(11.5).color(AppTheme::TEXT_SECONDARY));
+            ui.label(RichText::new("Start with palette:").size(11.5).color(AppTheme::text_secondary(ui)));
             if ui.button("Gruvbox Warm").clicked() {
                 self.new_theme_name = "Gruvbox Custom".to_string();
                 self.new_theme_desc = "Warm retro groove dark palette".to_string();
@@ -978,32 +979,32 @@ impl SettingsView {
     }
 
     fn show_general_tab(&mut self, ui: &mut Ui, accounts: &[Account], _storage: &Storage) {
-        ui.heading(RichText::new("Application & Storage").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.heading(RichText::new("Application & Storage").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(10.0);
 
         let active_db = get_database_path();
         let config_dir = get_config_dir();
         let themes_dir = get_themes_dir();
 
-        ui.label(RichText::new("STORAGE & FILE LOCATIONS").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("STORAGE & FILE LOCATIONS").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(6.0);
 
         egui::Frame::none()
-            .fill(AppTheme::BG_CARD)
-            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .fill(AppTheme::bg_card(ui))
+            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
             .rounding(Rounding::same(8.0))
             .inner_margin(14.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("• Active SQLite Database:").strong().color(AppTheme::TEXT_PRIMARY));
-                ui.label(RichText::new(format!("{}", active_db.display())).size(11.5).color(AppTheme::ACCENT_HOVER));
+                ui.label(RichText::new("• Active SQLite Database:").strong().color(AppTheme::text_primary(ui)));
+                ui.label(RichText::new(format!("{}", active_db.display())).size(11.5).color(AppTheme::accent_hover(ui)));
                 ui.add_space(4.0);
 
-                ui.label(RichText::new("• OS Config Directory:").strong().color(AppTheme::TEXT_PRIMARY));
-                ui.label(RichText::new(format!("{}", config_dir.display())).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                ui.label(RichText::new("• OS Config Directory:").strong().color(AppTheme::text_primary(ui)));
+                ui.label(RichText::new(format!("{}", config_dir.display())).size(11.5).color(AppTheme::text_secondary(ui)));
                 ui.add_space(4.0);
 
-                ui.label(RichText::new("• Custom Themes Directory:").strong().color(AppTheme::TEXT_PRIMARY));
-                ui.label(RichText::new(format!("{}", themes_dir.display())).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                ui.label(RichText::new("• Custom Themes Directory:").strong().color(AppTheme::text_primary(ui)));
+                ui.label(RichText::new(format!("{}", themes_dir.display())).size(11.5).color(AppTheme::text_secondary(ui)));
                 ui.add_space(10.0);
 
                 ui.horizontal(|ui| {
@@ -1044,7 +1045,7 @@ impl SettingsView {
             });
 
         ui.add_space(14.0);
-        ui.label(RichText::new("PERFORMANCE & ARCHITECTURE").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("PERFORMANCE & ARCHITECTURE").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
         ui.label("• Architecture: Fully native Rust multi-crate engine (Zero Chromium / Zero Electron)");
         ui.label("• GUI Toolkit: egui GPU-accelerated rendering (~38 MB base memory)");
@@ -1052,22 +1053,22 @@ impl SettingsView {
         ui.label("• Database: Embedded SQLite in WAL (Write-Ahead Logging) mode");
 
         ui.add_space(14.0);
-        ui.label(RichText::new("STORAGE STATS").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("STORAGE STATS").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
         ui.label(format!("• Accounts configured: {}", accounts.len()));
         ui.label("• SQLite WAL Mode: Enabled");
 
         ui.add_space(14.0);
-        ui.label(RichText::new("WINDOW & SYSTEM TRAY BEHAVIOR").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("WINDOW & SYSTEM TRAY BEHAVIOR").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(6.0);
 
         egui::Frame::none()
-            .fill(AppTheme::BG_CARD)
-            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .fill(AppTheme::bg_card(ui))
+            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
             .rounding(Rounding::same(8.0))
             .inner_margin(14.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("When clicking Window Close Button (✕):").strong().color(AppTheme::TEXT_PRIMARY));
+                ui.label(RichText::new("When clicking Window Close Button (✕):").strong().color(AppTheme::text_primary(ui)));
                 ui.add_space(6.0);
 
                 let mut cfg = load_app_config();
@@ -1094,7 +1095,7 @@ impl SettingsView {
             });
 
         ui.add_space(14.0);
-        ui.label(RichText::new("SYSTEM TRAY").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("SYSTEM TRAY").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
         ui.label("• StatusNotifierItem DBus tray enabled with live unread badge, quick compose, and show/hide window toggle.");
     }
@@ -1108,14 +1109,14 @@ impl SettingsView {
         storage: &Storage,
         on_data_changed: &mut bool,
     ) {
-        ui.heading(RichText::new("Backup & Restore Data").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.heading(RichText::new("Backup & Restore Data").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(4.0);
-        ui.label(RichText::new("Create portable complete backups of your email accounts configuration, themes, templates, signatures, and preferences.").size(12.0).color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("Create portable complete backups of your email accounts configuration, themes, templates, signatures, and preferences.").size(12.0).color(AppTheme::text_muted(ui)));
         ui.add_space(14.0);
 
         egui::Frame::none()
-            .fill(AppTheme::BG_CARD)
-            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .fill(AppTheme::bg_card(ui))
+            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
             .rounding(Rounding::same(8.0))
             .inner_margin(14.0)
             .show(ui, |ui| {
@@ -1127,7 +1128,7 @@ impl SettingsView {
             });
 
         ui.add_space(14.0);
-        ui.label(RichText::new("BACKUP CONTENTS SUMMARY").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("BACKUP CONTENTS SUMMARY").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
         ui.label(format!("• Email Accounts: {} configured", accounts.len()));
         ui.label(format!("• Quick Templates: {} templates", templates.len()));
@@ -1266,40 +1267,40 @@ impl SettingsView {
         accounts: &[Account],
         storage: &Storage,
     ) {
-        ui.heading(RichText::new("🔒 End-to-End Encryption (PGP / OpenPGP)").size(16.0));
+        ui.heading(RichText::new("🔒 End-to-End Encryption (PGP / OpenPGP)").size(16.0).color(AppTheme::text_primary(ui)));
         ui.label(
             RichText::new(
                 "Generate RSA-2048/AES-256 PGP keypairs for your accounts, manage public keys, and encrypt messages with military-grade privacy.",
             )
             .size(12.5)
-            .color(AppTheme::TEXT_SECONDARY),
+            .color(AppTheme::text_secondary(ui)),
         );
         ui.add_space(14.0);
 
         // Section 1: My Keypairs
-        ui.label(RichText::new("🔑 My Account Keypairs").size(14.0).strong());
+        ui.label(RichText::new("🔑 My Account Keypairs").size(14.0).strong().color(AppTheme::text_primary(ui)));
         ui.add_space(6.0);
 
         if accounts.is_empty() {
-            ui.label(RichText::new("No email accounts configured yet.").italics().color(AppTheme::TEXT_MUTED));
+            ui.label(RichText::new("No email accounts configured yet.").italics().color(AppTheme::text_muted(ui)));
         } else {
             for acc in accounts {
                 let existing_key = storage.get_pgp_key(&acc.email).ok().flatten();
 
                 egui::Frame::none()
-                    .fill(AppTheme::BG_CARD)
-                    .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                    .fill(AppTheme::bg_card(ui))
+                    .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
                     .rounding(Rounding::same(8.0))
                     .inner_margin(egui::Margin::symmetric(14.0, 12.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(&acc.email).strong().size(13.5).color(AppTheme::TEXT_PRIMARY));
+                                ui.label(RichText::new(&acc.email).strong().size(13.5).color(AppTheme::text_primary(ui)));
                                 if let Some(ref kp) = existing_key {
                                     ui.add_space(2.0);
-                                    ui.label(RichText::new(format!("Fingerprint: {}", kp.fingerprint)).monospace().size(11.0).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new(format!("Fingerprint: {}", kp.fingerprint)).monospace().size(11.0).color(AppTheme::text_muted(ui)));
                                 } else {
-                                    ui.label(RichText::new("No PGP keypair generated for this account").italics().size(11.5).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new("No PGP keypair generated for this account").italics().size(11.5).color(AppTheme::text_muted(ui)));
                                 }
                             });
 
@@ -1333,7 +1334,7 @@ impl SettingsView {
                                 } else {
                                     let email_clone = acc.email.clone();
                                     let gen_btn = egui::Button::new(RichText::new("✨ Generate Keypair").strong().color(Color32::WHITE).size(12.0))
-                                        .fill(AppTheme::ACCENT_PRIMARY);
+                                        .fill(AppTheme::accent(ui));
                                     if ui.add(gen_btn).clicked() {
                                         match email_core::pgp::generate_pgp_keypair(&email_clone) {
                                             Ok(new_kp) => {
@@ -1358,28 +1359,28 @@ impl SettingsView {
         ui.add_space(12.0);
 
         // Section 2: Recipient Public Keys
-        ui.label(RichText::new("👥 Recipient Public Keys (Address Book)").size(14.0).strong());
+        ui.label(RichText::new("👥 Recipient Public Keys (Address Book)").size(14.0).strong().color(AppTheme::text_primary(ui)));
         ui.add_space(4.0);
         ui.label(
             RichText::new("Import public keys for contacts you wish to send encrypted emails to.")
                 .size(12.0)
-                .color(AppTheme::TEXT_MUTED),
+                .color(AppTheme::text_muted(ui)),
         );
         ui.add_space(8.0);
 
         // Import Box
         egui::Frame::none()
-            .fill(AppTheme::BG_CARD)
-            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .fill(AppTheme::bg_card(ui))
+            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
             .rounding(Rounding::same(8.0))
             .inner_margin(egui::Margin::symmetric(14.0, 12.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Contact Email:").size(12.5));
+                    ui.label(RichText::new("Contact Email:").size(12.5).color(AppTheme::text_secondary(ui)));
                     ui.add(egui::TextEdit::singleline(&mut self.pgp_import_email).hint_text("colleague@company.com").desired_width(260.0));
                 });
                 ui.add_space(6.0);
-                ui.label(RichText::new("Armored Public Key (-----BEGIN PGP PUBLIC KEY BLOCK-----):").size(12.0).color(AppTheme::TEXT_MUTED));
+                ui.label(RichText::new("Armored Public Key (-----BEGIN PGP PUBLIC KEY BLOCK-----):").size(12.0).color(AppTheme::text_muted(ui)));
                 ui.add(
                     egui::TextEdit::multiline(&mut self.pgp_import_armored_key)
                         .hint_text("Paste armored public key block here...")
@@ -1434,12 +1435,12 @@ impl SettingsView {
         if let Ok(all_keys) = storage.get_all_pgp_keys() {
             let recipients_only: Vec<_> = all_keys.into_iter().filter(|k| k.private_key_armored.is_empty()).collect();
             if !recipients_only.is_empty() {
-                ui.label(RichText::new(format!("Imported Contact Keys ({})", recipients_only.len())).size(13.0).strong());
+                ui.label(RichText::new(format!("Imported Contact Keys ({})", recipients_only.len())).size(13.0).strong().color(AppTheme::text_primary(ui)));
                 ui.add_space(4.0);
                 for k in recipients_only {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("👤").size(13.0));
-                        ui.label(RichText::new(&k.email).strong().size(12.5));
+                        ui.label(RichText::new(&k.email).strong().size(12.5).color(AppTheme::text_primary(ui)));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let email_del = k.email.clone();
                             if ui.small_button(RichText::new("🗑 Delete").color(AppTheme::ACCENT_DANGER)).clicked() {

@@ -134,13 +134,13 @@ impl MessageListView {
             ui.horizontal(|ui| {
                 let search_width = ui.available_width() - 8.0;
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(search_width, 32.0), Sense::hover());
-                ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::BG_CARD);
-                ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+                ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::bg_card(ui));
+                ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::border_subtle(ui)));
 
                 let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
                 search_ui.horizontal(|ui| {
                     ui.add_space(8.0);
-                    ui.label(RichText::new("🔍").size(12.0).color(AppTheme::TEXT_MUTED));
+                    ui.label(RichText::new("🔍").size(12.0).color(AppTheme::text_muted(ui)));
                     let response = ui.add(
                         egui::TextEdit::singleline(search_query)
                             .hint_text("Search emails (subject, sender, content)... [ / ]")
@@ -195,7 +195,7 @@ impl MessageListView {
 
                 let star_btn = ui.selectable_label(
                     is_starred_active,
-                    RichText::new("★ Starred").size(10.5).color(if is_starred_active { AppTheme::ACCENT_STAR } else { AppTheme::TEXT_MUTED }),
+                    RichText::new("★ Starred").size(10.5).color(if is_starred_active { AppTheme::ACCENT_STAR } else { AppTheme::text_muted(ui) }),
                 );
                 if star_btn.clicked() {
                     toggle_search_token(search_query, "is:starred");
@@ -218,7 +218,7 @@ impl MessageListView {
         ui.painter().hline(
             ui.available_rect_before_wrap().x_range(),
             ui.cursor().top(),
-            Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+            Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
         );
 
         ui.add_space(2.0);
@@ -231,7 +231,7 @@ impl MessageListView {
                 ui.label(
                     RichText::new("No messages in this folder")
                         .size(13.0)
-                        .color(AppTheme::TEXT_MUTED),
+                        .color(AppTheme::text_muted(ui)),
                 );
             });
             return;
@@ -304,13 +304,13 @@ impl MessageListView {
 
                     // Background highlight
                     let bg_color = if is_in_selection || is_active_view {
-                        AppTheme::BG_SELECTED
+                        AppTheme::bg_selected(ui)
                     } else if response.hovered() {
-                        AppTheme::BG_HOVER
+                        AppTheme::bg_hover(ui)
                     } else if !msg.is_read {
-                        AppTheme::BG_UNREAD_ROW
+                        AppTheme::bg_unread_row(ui)
                     } else {
-                        AppTheme::BG_LIST
+                        AppTheme::bg_list(ui)
                     };
 
                     ui.painter().rect_filled(rect, Rounding::same(6.0), bg_color);
@@ -318,7 +318,7 @@ impl MessageListView {
                     if is_active_view || is_in_selection {
                         // Left active indicator
                         let indicator = Rect::from_min_size(rect.min, Vec2::new(3.5, Self::ROW_HEIGHT));
-                        ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::ACCENT_PRIMARY);
+                        ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::accent(ui));
                     }
 
                     // Child UI layout with hard boundary clipping
@@ -342,8 +342,8 @@ impl MessageListView {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
 
-                        let cb_border = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
-                        let cb_bg = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { Color32::TRANSPARENT };
+                        let cb_border = if is_in_selection { AppTheme::accent(ui) } else { AppTheme::border_subtle(ui) };
+                        let cb_bg = if is_in_selection { AppTheme::accent(ui) } else { Color32::TRANSPARENT };
                         ui.painter().rect_filled(cb_rect, Rounding::same(4.0), cb_bg);
                         ui.painter().rect_stroke(cb_rect, Rounding::same(4.0), Stroke::new(1.0_f32, cb_border));
                         if is_in_selection {
@@ -367,7 +367,7 @@ impl MessageListView {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
                         let dot_color = if !msg.is_read {
-                            AppTheme::ACCENT_PRIMARY
+                            AppTheme::accent(ui)
                         } else {
                             Color32::TRANSPARENT
                         };
@@ -403,7 +403,7 @@ impl MessageListView {
                                     ui.label(
                                         RichText::new(msg.formatted_date())
                                             .size(11.0)
-                                            .color(AppTheme::TEXT_MUTED),
+                                            .color(AppTheme::text_muted(ui)),
                                     );
 
                                     // Star Toggle button
@@ -411,7 +411,7 @@ impl MessageListView {
                                     let star_color = if msg.is_flagged {
                                         AppTheme::ACCENT_STAR
                                     } else {
-                                        AppTheme::TEXT_MUTED
+                                        AppTheme::text_muted(ui)
                                     };
                                     let star_btn = ui.button(RichText::new(star_char).size(13.0).color(star_color));
                                     if star_btn.clicked() {
@@ -423,10 +423,12 @@ impl MessageListView {
 
                                     // Left: Sender Name (strictly single-line with ellipsis)
                                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                        let sender_color = if !msg.is_read {
-                                            AppTheme::TEXT_PRIMARY
+                                        let sender_color = if is_active_view || is_in_selection {
+                                            Color32::WHITE
+                                        } else if !msg.is_read {
+                                            AppTheme::text_primary(ui)
                                         } else {
-                                            AppTheme::TEXT_SECONDARY
+                                            AppTheme::text_secondary(ui)
                                         };
                                         let sender_style = if !msg.is_read {
                                             RichText::new(msg.sender_display()).strong().size(13.0).color(sender_color)
@@ -450,9 +452,9 @@ impl MessageListView {
                             let subj_color = if is_active_view || is_in_selection {
                                 Color32::WHITE
                             } else if !msg.is_read {
-                                AppTheme::TEXT_PRIMARY
+                                AppTheme::text_primary(ui)
                             } else {
-                                AppTheme::TEXT_SECONDARY
+                                AppTheme::text_secondary(ui)
                             };
 
                             let subj_style = if !msg.is_read {
@@ -466,11 +468,16 @@ impl MessageListView {
 
                             // Row 3: Snippet Preview (strictly single-line with ellipsis)
                             let snippet_display = msg.snippet.replace('\n', " ").replace('\r', " ");
+                            let snippet_color = if is_active_view || is_in_selection {
+                                Color32::from_rgb(220, 230, 245)
+                            } else {
+                                AppTheme::text_muted(ui)
+                            };
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(snippet_display)
                                         .size(11.0)
-                                        .color(AppTheme::TEXT_MUTED),
+                                        .color(snippet_color),
                                 )
                                 .truncate(),
                             );
@@ -483,7 +490,7 @@ impl MessageListView {
                     ui.painter().hline(
                         rect.x_range(),
                         rect.bottom(),
-                        Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
+                        Stroke::new(1.0_f32, AppTheme::border_subtle(ui)),
                     );
                 }
             });
