@@ -302,13 +302,23 @@ impl MessageViewPane {
                 let collapse_id = ui.make_persistent_id(format!("thread_exp_{}", item_msg.id));
                 let mut is_expanded = ui.data_mut(|d| *d.get_temp_mut_or_insert_with(collapse_id, || is_last));
 
+                let is_hoverable = thread_messages.len() > 1;
+                let card_stroke = if is_expanded {
+                    Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY)
+                } else {
+                    Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE)
+                };
+
                 egui::Frame::none()
                     .fill(if is_expanded { AppTheme::BG_CARD } else { AppTheme::BG_VIEW })
-                    .stroke(Stroke::new(1.0_f32, if is_expanded { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE }))
+                    .stroke(card_stroke)
                     .rounding(Rounding::same(8.0))
                     .inner_margin(egui::Margin::symmetric(14.0, 10.0))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        let header_id = ui.make_persistent_id(format!("thread_hdr_{}", item_msg.id));
+                        let mut toggle_requested = false;
+
+                        let header_resp = ui.horizontal(|ui| {
                             // Avatar Circle
                             let avatar_size = 32.0;
                             let (avatar_rect, _) = ui.allocate_exact_size(Vec2::new(avatar_size, avatar_size), Sense::hover());
@@ -359,13 +369,47 @@ impl MessageViewPane {
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if thread_messages.len() > 1 {
-                                    let btn_text = if is_expanded { "▲ Collapse" } else { "▼ Expand" };
-                                    if ui.small_button(btn_text).clicked() {
-                                        is_expanded = !is_expanded;
-                                        ui.data_mut(|d| *d.get_temp_mut_or_insert_with(collapse_id, || is_last) = is_expanded);
+                                if is_hoverable {
+                                    let badge_bg = if is_expanded {
+                                        AppTheme::BG_HOVER
+                                    } else {
+                                        AppTheme::ACCENT_PRIMARY.linear_multiply(0.18)
+                                    };
+                                    let badge_fg = if is_expanded {
+                                        AppTheme::TEXT_SECONDARY
+                                    } else {
+                                        AppTheme::ACCENT_PRIMARY
+                                    };
+                                    let action_label = if is_expanded { "Collapse" } else { "Expand" };
+
+                                    let badge_resp = egui::Frame::none()
+                                        .fill(badge_bg)
+                                        .stroke(Stroke::new(1.0_f32, if is_expanded { AppTheme::BORDER_SUBTLE } else { AppTheme::ACCENT_PRIMARY }))
+                                        .rounding(Rounding::same(5.0))
+                                        .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                // Draw crisp vector chevron
+                                                let (chevron_rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
+                                                let c = chevron_rect.center();
+                                                if is_expanded {
+                                                    // Upward chevron ^
+                                                    ui.painter().line_segment([c + Vec2::new(-4.0, 2.0), c + Vec2::new(0.0, -2.0)], Stroke::new(1.8_f32, badge_fg));
+                                                    ui.painter().line_segment([c + Vec2::new(0.0, -2.0), c + Vec2::new(4.0, 2.0)], Stroke::new(1.8_f32, badge_fg));
+                                                } else {
+                                                    // Downward chevron v
+                                                    ui.painter().line_segment([c + Vec2::new(-4.0, -2.0), c + Vec2::new(0.0, 2.0)], Stroke::new(1.8_f32, badge_fg));
+                                                    ui.painter().line_segment([c + Vec2::new(0.0, 2.0), c + Vec2::new(4.0, -2.0)], Stroke::new(1.8_f32, badge_fg));
+                                                }
+                                                ui.label(RichText::new(action_label).size(11.5).strong().color(badge_fg));
+                                            });
+                                        });
+
+                                    if badge_resp.response.interact(Sense::click()).clicked() {
+                                        toggle_requested = true;
                                     }
                                 }
+
                                 let full_date = item_msg.formatted_full_date();
                                 if !full_date.is_empty() {
                                     ui.label(
@@ -376,6 +420,17 @@ impl MessageViewPane {
                                 }
                             });
                         });
+
+                        if is_hoverable {
+                            let click_area = ui.interact(header_resp.response.rect, header_id, Sense::click());
+                            if click_area.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            if click_area.clicked() || toggle_requested {
+                                is_expanded = !is_expanded;
+                                ui.data_mut(|d| *d.get_temp_mut_or_insert_with(collapse_id, || is_last) = is_expanded);
+                            }
+                        }
 
                         if is_expanded {
                             ui.add_space(10.0);

@@ -392,14 +392,11 @@ impl EmailApp {
             crate::CloseButtonAction::MinimizeToTray => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 self.is_window_visible = false;
                 if let Some(ref tray) = self.tray {
                     tray.set_visible(false);
                 }
-                self.status_toast = Some((
-                    "AT-mail-rs minimized to system tray".to_string(),
-                    std::time::Instant::now(),
-                ));
             }
             crate::CloseButtonAction::QuitApplication => {
                 std::process::exit(0);
@@ -756,6 +753,11 @@ impl App for EmailApp {
             self.handle_close_requested(ctx);
         }
 
+        if !self.is_window_visible {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            return;
+        }
+
         if self.current_theme == crate::theme::ThemePreset::GruvboxAuto {
             AppTheme::apply_preset(ctx, crate::theme::ThemePreset::GruvboxAuto);
         }
@@ -841,20 +843,45 @@ impl App for EmailApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Window Controls: Close (✕), Maximize/Restore (🗖), Minimize (➖)
-                    let close_btn = egui::Button::new(RichText::new("✕").size(11.0).color(Color32::WHITE))
-                        .fill(AppTheme::ACCENT_DANGER)
-                        .rounding(Rounding::same(4.0));
-                    if ui.add(close_btn).on_hover_text("Close window").clicked() {
+                    // Window Controls: Close (×), Maximize/Restore (◻/⧉), Minimize (−)
+                    let close_btn = egui::Button::new(
+                        RichText::new("×")
+                            .size(15.0)
+                            .strong()
+                            .color(Color32::WHITE),
+                    )
+                    .fill(Color32::from_rgb(225, 45, 57))
+                    .min_size(egui::vec2(22.0, 18.0))
+                    .rounding(Rounding::same(4.0));
+
+                    if ui.add(close_btn).on_hover_text("Close / Minimize to tray").clicked() {
                         self.handle_close_requested(ctx);
                     }
 
-                    if ui.button(RichText::new("🗖").size(11.0)).on_hover_text("Maximize / Restore window").clicked() {
+                    let max_label = if self.is_maximized { "⧉" } else { "◻" };
+                    let max_btn = egui::Button::new(
+                        RichText::new(max_label)
+                            .size(12.0)
+                            .color(AppTheme::TEXT_PRIMARY),
+                    )
+                    .min_size(egui::vec2(22.0, 18.0))
+                    .rounding(Rounding::same(4.0));
+
+                    if ui.add(max_btn).on_hover_text("Maximize / Restore window").clicked() {
                         self.is_maximized = !self.is_maximized;
                         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(self.is_maximized));
                     }
 
-                    if ui.button(RichText::new("➖").size(11.0)).on_hover_text("Minimize window").clicked() {
+                    let min_btn = egui::Button::new(
+                        RichText::new("−")
+                            .size(15.0)
+                            .strong()
+                            .color(AppTheme::TEXT_PRIMARY),
+                    )
+                    .min_size(egui::vec2(22.0, 18.0))
+                    .rounding(Rounding::same(4.0));
+
+                    if ui.add(min_btn).on_hover_text("Minimize window").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                     }
 
