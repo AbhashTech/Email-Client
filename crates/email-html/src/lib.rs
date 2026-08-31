@@ -272,6 +272,11 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             "/i" | "/em" => is_italic = false,
             "code" => is_code = true,
             "/code" => is_code = false,
+            "/span" | "/font" => {
+                current_color = None;
+                current_override_style = None;
+                current_bg = None;
+            }
             "center" => current_is_center = true,
             "/center" => current_is_center = false,
             "a" => {

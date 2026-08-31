@@ -565,7 +565,7 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
         ui.set_max_width(wrap_width);
         ui.horizontal_wrapped(|ui| {
             for span in spans {
-                let mut text = RichText::new(&span.text).size(14.0).line_height(Some(22.0));
+                let mut text = RichText::new(&span.text).size(14.5).line_height(Some(22.0));
                 let default_color = if is_light_canvas {
                     Color32::from_rgb(33, 37, 41)
                 } else {
@@ -599,14 +599,8 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
                     TextStyle::Code => {
                         text = text.monospace().background_color(Color32::from_rgb(235, 230, 220)).color(Color32::from_rgb(180, 80, 0));
                     }
-                    TextStyle::Heading1 => {
-                        text = text.size(22.0).strong().color(col);
-                    }
-                    TextStyle::Heading2 => {
-                        text = text.size(17.0).strong().color(col);
-                    }
-                    TextStyle::Heading3 => {
-                        text = text.size(15.0).strong().color(col);
+                    TextStyle::Heading1 | TextStyle::Heading2 | TextStyle::Heading3 => {
+                        text = text.strong().color(col);
                     }
                 }
 
