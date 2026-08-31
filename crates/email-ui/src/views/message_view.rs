@@ -41,34 +41,30 @@ impl MessageViewPane {
         let msg = &detail.header;
 
         // 1. Action Toolbar
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            if ui.button(RichText::new("↩ Reply").size(12.5)).on_hover_text("Reply (HTML format by default)").clicked() {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+            if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
                 *on_reply = Some(detail.clone());
             }
-            if ui.button(RichText::new("📝 Text Reply").size(12.5)).on_hover_text("Reply in plain text format only").clicked() {
+            if ui.button(RichText::new("📝 Text Reply").size(12.0)).on_hover_text("Reply in plain text format only").clicked() {
                 *on_reply_plain = Some(detail.clone());
             }
-            if ui.button(RichText::new("👥 Reply All").size(12.5)).on_hover_text("Reply to all recipients").clicked() {
+            if ui.button(RichText::new("👥 Reply All").size(12.0)).on_hover_text("Reply to all recipients").clicked() {
                 *on_reply_all = Some(detail.clone());
             }
-            if ui.button(RichText::new("➡ Forward").size(12.5)).on_hover_text("Forward message").clicked() {
+            if ui.button(RichText::new("➡ Forward").size(12.0)).on_hover_text("Forward message").clicked() {
                 *on_forward = Some(detail.clone());
             }
 
-            ui.add_space(8.0);
-
-            let read_label = if msg.is_read { "✉ Mark Unread" } else { "✉ Mark Read" };
-            if ui.button(RichText::new(read_label).size(12.5)).clicked() {
+            let read_label = if msg.is_read { "✉ Unread" } else { "✉ Read" };
+            if ui.button(RichText::new(read_label).size(12.0)).clicked() {
                 *on_toggle_read = Some((msg.id.clone(), !msg.is_read));
             }
 
-            ui.add_space(8.0);
-
             // Move to Folder dropdown
             egui::ComboBox::from_id_salt(format!("move_combo_{}", msg.id))
-                .selected_text(RichText::new("📁 Move to...").size(12.5))
+                .selected_text(RichText::new("📁 Move").size(12.0))
                 .show_ui(ui, |ui| {
                     for f in folders {
                         if f.id != msg.folder_id {
@@ -79,14 +75,12 @@ impl MessageViewPane {
                     }
                 });
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(RichText::new("🗑 Delete").size(12.5).color(AppTheme::ACCENT_DANGER))
-                    .clicked()
-                {
-                    *on_delete = Some(msg.id.clone());
-                }
-            });
+            if ui
+                .button(RichText::new("🗑 Delete").size(12.0).color(AppTheme::ACCENT_DANGER))
+                .clicked()
+            {
+                *on_delete = Some(msg.id.clone());
+            }
         });
 
         ui.add_space(6.0);
@@ -95,12 +89,16 @@ impl MessageViewPane {
             ui.cursor().top(),
             Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
         );
-        ui.add_space(12.0);
+        ui.add_space(10.0);
 
-        let wrap_width = ui.available_width().max(350.0);
+        let avail_width = ui.available_width();
+        let avail_height = ui.available_height();
+        let wrap_width = avail_width.max(300.0);
 
         ScrollArea::both()
-            .auto_shrink([false; 2])
+            .auto_shrink([false, false])
+            .max_width(avail_width)
+            .max_height(avail_height)
             .hscroll(true)
             .vscroll(true)
             .show(ui, |ui| {
@@ -373,7 +371,7 @@ impl MessageViewPane {
                 ui.add_space(14.0);
 
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 14.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
 
                     for att in &detail.attachments {
                         let size_kb = att.size_bytes / 1024;
@@ -383,8 +381,14 @@ impl MessageViewPane {
                             format!("{} KB", size_kb)
                         };
 
+                        let card_width = if ui.available_width() < 480.0 {
+                            (ui.available_width() - 8.0).max(180.0)
+                        } else {
+                            230.0
+                        };
+
                         let (rect, resp) = ui.allocate_exact_size(
-                            Vec2::new(250.0, 60.0),
+                            Vec2::new(card_width, 56.0),
                             Sense::click(),
                         );
 
