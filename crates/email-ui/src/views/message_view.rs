@@ -75,6 +75,38 @@ impl MessageViewPane {
                     }
                 });
 
+            if ui.button(RichText::new("🌐 Full Web View").size(12.0))
+                .on_hover_text("Open 100% pixel-perfect HTML in browser/webview")
+                .clicked()
+            {
+                let temp_dir = std::env::temp_dir();
+                let preview_file = temp_dir.join(format!("email_preview_{}.html", msg.id));
+
+                let raw_body = detail.body_html.as_deref().unwrap_or(detail.body_plain.as_deref().unwrap_or(""));
+                let mut full_html = raw_body.to_string();
+
+                for att in &detail.attachments {
+                    if let Some(ref cid) = att.content_id {
+                        let clean_cid = cid.trim_matches(|c| c == '<' || c == '>');
+                        if let Some(ref cache_path) = att.local_cache_path {
+                            let file_uri = format!("file://{}", cache_path);
+                            full_html = full_html.replace(&format!("cid:{}", clean_cid), &file_uri);
+                            full_html = full_html.replace(&format!("cid:<{}>", clean_cid), &file_uri);
+                        }
+                    }
+                }
+
+                let doc = if detail.body_html.is_some() {
+                    full_html
+                } else {
+                    format!("<pre style=\"white-space: pre-wrap; font-family: monospace;\">{}</pre>", html_escape::encode_text(&full_html))
+                };
+
+                if std::fs::write(&preview_file, doc).is_ok() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file://{}", preview_file.display())));
+                }
+            }
+
             if ui
                 .button(RichText::new("🗑 Delete").size(12.0).color(AppTheme::ACCENT_DANGER))
                 .clicked()
