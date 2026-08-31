@@ -10,10 +10,15 @@
   - Built with native **Rust** and GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead.
   - Startup time < 100ms; idle resident memory footprint < 45 MB.
 
-- 🖥️ **True 3-Pane Resizable Layout**:
-  - **Sidebar Panel**: Resizable panel (180px–320px) displaying unified Smart Views (All Inboxes, Unread, Starred, Sent, Drafts, Trash) and collapsible account folder trees.
-  - **Message List Panel**: Resizable panel (260px–600px) with virtualized scrolling, sender avatar pills, unread indicators, and live multi-attribute search.
+- 🖥️ **True 3-Pane Resizable Layout & Drag-and-Drop**:
+  - **Sidebar Panel**: Resizable panel (180px–320px) displaying unified Smart Views (All Inboxes, Unread, Starred, Sent, Drafts, Trash) and collapsible account folder trees. Acts as active **Drag-and-Drop drop targets** with visual glow highlights.
+  - **Message List Panel**: Resizable panel (260px–600px) with virtualized scrolling, sender avatar pills, unread indicators, live multi-attribute search, and full multi-selection support.
   - **Reading Pane**: Full-width reading container with responsive email header cards, rendered HTML bodies, attachments, and quick action bar (Reply, Reply All, Forward, Star, Mark Read/Unread, Delete).
+
+- 📦 **Multi-Select & Batch Operations**:
+  - **Multiple Selection Methods**: Select emails via row checkboxes `[✓]`, `Ctrl / Cmd + Click` to toggle individual items, and `Shift + Click` to select contiguous ranges.
+  - **Dynamic Batch Actions Bar**: Quick access to **Batch Delete (`🗑 Delete`)**, **Batch Move (`📁 Move ▾`)** to any folder, **Batch Mark Read/Unread (`✉ Read` / `✉ Unread`)**, **Batch Star (`★ Star`)**, and **Select All / Deselect All (`[☑]`)**.
+  - **Drag-and-Drop Organization**: Drag any email or batch of selected emails directly onto sidebar folders with real-time mouse payload badges (`📁 Moving N emails...`).
 
 - 📬 **Full IMAP & SMTP Engine**:
   - **MIME & Envelope Decoding**: Automatic RFC 2047 and MIME parsing (`mailparse`) resolving subjects, senders, recipients, and timestamps.
@@ -29,10 +34,11 @@
   - **Text-Only Reply Action**: Dedicated `📝 Text Reply` button in the reading pane to reply in clean plain text with converted quoted context.
   - **Automatic Default Signatures**: Default signatures (account-specific or global) are automatically attached to new emails and replies, with support for rich HTML signatures, HTML sanitization, and toolbar dropdown selector.
 
-- 🎨 **HTML Email Rendering & Inline Images**:
+- 🎨 **HTML Email Rendering, WebKit View & Safe File Dialogs**:
   - Native AST HTML sanitizer that removes conditional comments (`<!--[if ...]>`), XML declarations, and `<style>` blocks.
   - Automatic `cid:xxx` inline MIME attachment resolution with GPU image rendering (PNG, JPEG, WebP, SVG).
-  - One-click attachment downloading: clicking attachments opens a native system file save dialog.
+  - Non-blocking asynchronous file save dialogs for attachments and image context menus.
+  - In-App WebKit reader window with seamless browser fallback.
 
 - ⚙️ **Rich Preferences & Customization**:
   - **Account Manager**: Add, edit, test connections, and delete IMAP/SMTP accounts.
