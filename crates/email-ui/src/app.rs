@@ -754,6 +754,10 @@ impl App for EmailApp {
         }
 
         if !self.is_window_visible {
+            // Render an opaque background so Wayland compositor receives a valid committed frame buffer
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(AppTheme::BG_APP))
+                .show(ctx, |_ui| {});
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
             return;
         }

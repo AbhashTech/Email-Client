@@ -78,7 +78,8 @@ fn main() -> Result<(), eframe::Error> {
         viewport: egui::ViewportBuilder::default()
             .with_title("AT-mail-rs")
             .with_inner_size([1200.0, 780.0])
-            .with_min_inner_size([880.0, 540.0]),
+            .with_min_inner_size([880.0, 540.0])
+            .with_transparent(false),
         ..Default::default()
     };
 
