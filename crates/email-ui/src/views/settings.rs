@@ -167,8 +167,12 @@ impl SettingsView {
             .fill(if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD })
             .rounding(Rounding::same(6.0));
 
-        if ui.add(btn).clicked() {
+        let resp = ui.add(btn);
+        if resp.clicked() {
             *current_tab = target_tab;
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
     }
 

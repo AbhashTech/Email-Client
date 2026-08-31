@@ -665,6 +665,9 @@ impl MessageViewPane {
                             });
                         });
 
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
                         resp.on_hover_text(format!("Click to choose where to save '{}'", att.filename));
                     }
                 });
@@ -728,19 +731,25 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
                             .color(Color32::from_rgb(220, 38, 38))
                             .strong()
                             .underline();
-                        ui.hyperlink_to(warn_text, url)
+                        let link_resp = ui.hyperlink_to(warn_text, url)
                             .on_hover_text(format!("⚠️ Suspicious link! Display text is '{}' but target destination is '{}'", span.text, url));
+                        if link_resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
                     } else {
                         let link_col = if is_light_canvas {
                             Color32::from_rgb(26, 115, 232)
                         } else {
                             AppTheme::ACCENT_HOVER
                         };
-                        ui.hyperlink_to(text.color(link_col).underline(), url)
+                        let link_resp = ui.hyperlink_to(text.color(link_col).underline(), url)
                             .on_hover_text(url);
+                        if link_resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
                     }
                 } else {
-                    ui.label(text);
+                    ui.add(egui::Label::new(text).selectable(true));
                 }
             }
         });

@@ -182,10 +182,16 @@ impl MessageListView {
                 if all_btn.clicked() {
                     clear_search_filter_tokens(search_query);
                 }
+                if all_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
 
                 let unread_btn = ui.selectable_label(is_unread_active, RichText::new("✉ Unread").size(10.5));
                 if unread_btn.clicked() {
                     toggle_search_token(search_query, "is:unread");
+                }
+                if unread_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
 
                 let star_btn = ui.selectable_label(
@@ -195,10 +201,16 @@ impl MessageListView {
                 if star_btn.clicked() {
                     toggle_search_token(search_query, "is:starred");
                 }
+                if star_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
 
                 let att_btn = ui.selectable_label(has_att_active, RichText::new("📎 Files").size(10.5));
                 if att_btn.clicked() {
                     toggle_search_token(search_query, "has:attachment");
+                }
+                if att_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
             });
         }
@@ -239,6 +251,9 @@ impl MessageListView {
                         Vec2::new(ui.available_width(), Self::ROW_HEIGHT),
                         Sense::click_and_drag(),
                     );
+                    if response.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
 
                     // Drag-and-drop source
                     if response.drag_started() {
@@ -323,6 +338,9 @@ impl MessageListView {
                             *selected_message_id = Some(msg.id.clone());
                             *last_clicked_idx = Some(idx);
                         }
+                        if cb_resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
 
                         let cb_border = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
                         let cb_bg = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { Color32::TRANSPARENT };
@@ -344,6 +362,9 @@ impl MessageListView {
                         let (dot_rect, dot_resp) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::click());
                         if dot_resp.clicked() {
                             *on_toggle_read = Some((msg.id.clone(), !msg.is_read));
+                        }
+                        if dot_resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
                         let dot_color = if !msg.is_read {
                             AppTheme::ACCENT_PRIMARY
@@ -402,8 +423,12 @@ impl MessageListView {
                                     } else {
                                         AppTheme::TEXT_MUTED
                                     };
-                                    if ui.button(RichText::new(star_char).size(13.0).color(star_color)).clicked() {
+                                    let star_btn = ui.button(RichText::new(star_char).size(13.0).color(star_color));
+                                    if star_btn.clicked() {
                                         *on_toggle_flag = Some((msg.id.clone(), !msg.is_flagged));
+                                    }
+                                    if star_btn.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
                                 });
                             });

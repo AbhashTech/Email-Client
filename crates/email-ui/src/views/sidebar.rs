@@ -229,6 +229,10 @@ impl SidebarView {
             Sense::click(),
         );
 
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+
         if response.clicked() {
             on_click();
         }

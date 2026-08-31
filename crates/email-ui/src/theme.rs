@@ -186,6 +186,7 @@ impl AppTheme {
         style.spacing.item_spacing = egui::Vec2::new(8.0, 6.0);
         style.spacing.button_padding = egui::Vec2::new(10.0, 6.0);
         style.spacing.window_margin = Margin::same(16.0);
+        style.interaction.selectable_labels = false;
 
         ctx.set_style(style);
     }

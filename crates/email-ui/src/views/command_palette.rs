@@ -232,11 +232,13 @@ impl CommandPalette {
                                 });
                             });
 
-                            if res.response.interact(egui::Sense::click()).clicked() {
+                            let interact_resp = res.response.interact(egui::Sense::click());
+                            if interact_resp.clicked() {
                                 executed_action = Some(item.action.clone());
                             }
-                            if res.response.hovered() {
+                            if interact_resp.hovered() {
                                 self.selected_idx = idx;
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             }
                         }
                     });
