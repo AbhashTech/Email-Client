@@ -19,6 +19,7 @@ impl AppTheme {
     pub const ACCENT_HOVER: Color32 = Color32::from_rgb(90, 150, 255);
     pub const ACCENT_STAR: Color32 = Color32::from_rgb(255, 193, 7);       // Star Gold #ffc107
     pub const ACCENT_SUCCESS: Color32 = Color32::from_rgb(52, 168, 83);    // Green #34a853
+    pub const ACCENT_WARNING: Color32 = Color32::from_rgb(251, 146, 60);    // Amber Orange #fb923c
     pub const ACCENT_DANGER: Color32 = Color32::from_rgb(234, 67, 53);     // Red #ea4335
 
 

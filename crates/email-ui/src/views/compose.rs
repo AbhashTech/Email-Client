@@ -1,10 +1,8 @@
 use crate::theme::AppTheme;
 use egui::{Color32, RichText, Rounding, Stroke, Window};
-use email_core::events::SyncCommand;
 use email_core::models::{Account, MessageHeader, OutgoingDraft, Recipient, Signature, Template};
 use email_keychain::CredentialStore;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComposeFormat {
@@ -132,14 +130,29 @@ impl ComposeView {
         self.error_msg = None;
     }
 
+    pub fn restore_from_draft(&mut self, draft: &OutgoingDraft) {
+        self.is_open = true;
+        self.selected_account_id = draft.account_id.clone();
+        self.to_input = draft.to.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
+        self.cc_input = draft.cc.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
+        self.bcc_input = draft.bcc.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
+        self.show_cc_bcc = !self.cc_input.is_empty() || !self.bcc_input.is_empty();
+        self.subject = draft.subject.clone();
+        self.body_plain = draft.body_plain.clone();
+        self.in_reply_to = draft.in_reply_to.clone();
+        self.references = draft.references.clone();
+        self.format = if draft.body_html.is_some() { ComposeFormat::Markdown } else { ComposeFormat::PlainText };
+        self.error_msg = None;
+    }
+
     pub fn show(
         &mut self,
         ctx: &egui::Context,
         accounts: &[Account],
         templates: &[Template],
         signatures: &[Signature],
-        cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
         keyring: &Arc<dyn CredentialStore>,
+        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
     ) {
         if !self.is_open {
             return;
@@ -183,7 +196,7 @@ impl ComposeView {
                     .rounding(Rounding::same(6.0));
 
                     if ui.add(top_send_btn).clicked() {
-                        self.execute_send(accounts, signatures, cmd_tx, keyring);
+                        self.execute_send(accounts, signatures, keyring, on_schedule_send);
                     }
 
                     ui.add_space(4.0);
@@ -530,8 +543,8 @@ impl ComposeView {
         &mut self,
         accounts: &[Account],
         signatures: &[Signature],
-        cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
         keyring: &Arc<dyn CredentialStore>,
+        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
     ) {
         if self.to_input.trim().is_empty() {
             self.error_msg = Some("Please specify at least one recipient email address.".to_string());
@@ -632,10 +645,7 @@ impl ComposeView {
         if let Some(acc) = current_account {
             match keyring.get_credential(&acc.credential_key) {
                 Ok(pwd) => {
-                    let _ = cmd_tx.send(SyncCommand::SendEmail {
-                        draft,
-                        password: pwd,
-                    });
+                    *on_schedule_send = Some((draft, pwd));
                     self.is_open = false;
                 }
                 Err(e) => {

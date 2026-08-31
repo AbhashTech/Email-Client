@@ -4,13 +4,21 @@ use crate::views::*;
 use eframe::App;
 use egui::{Color32, RichText, Rounding, TopBottomPanel};
 use email_core::events::{SyncCommand, SyncEvent};
-use email_core::models::{Account, Folder, MessageDetail, MessageHeader, Signature, Template};
+use email_core::models::{Account, Folder, MessageDetail, MessageHeader, OutgoingDraft, Signature, Template};
 use email_keychain::CredentialStore;
 use email_storage::Storage;
 use log::error;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+
+#[derive(Clone)]
+pub struct PendingSend {
+    pub draft: OutgoingDraft,
+    pub password: String,
+    pub scheduled_time: std::time::Instant,
+    pub duration: std::time::Duration,
+}
 
 pub struct EmailApp {
     storage: Storage,
@@ -35,6 +43,7 @@ pub struct EmailApp {
     search_query: String,
     focus_search_requested: bool,
     allowed_remote_images: HashSet<String>,
+    pending_send: Option<PendingSend>,
     status_text: String,
     status_toast: Option<(String, std::time::Instant)>,
     is_syncing: bool,
@@ -82,6 +91,7 @@ impl EmailApp {
             search_query: String::new(),
             focus_search_requested: false,
             allowed_remote_images: HashSet::new(),
+            pending_send: None,
             status_text: "Ready".to_string(),
             status_toast: None,
             is_syncing: false,
@@ -1066,14 +1076,25 @@ impl App for EmailApp {
             &self.keyring,
         );
 
+        let mut on_schedule_send: Option<(OutgoingDraft, String)> = None;
+
         self.compose_view.show(
             ctx,
             &self.accounts,
             &self.templates,
             &self.signatures,
-            &self.cmd_tx,
             &self.keyring,
+            &mut on_schedule_send,
         );
+
+        if let Some((draft, pwd)) = on_schedule_send {
+            self.pending_send = Some(PendingSend {
+                draft,
+                password: pwd,
+                scheduled_time: std::time::Instant::now(),
+                duration: std::time::Duration::from_secs(5),
+            });
+        }
 
         let mut on_add_account_from_settings = false;
         let mut on_edit_account: Option<Account> = None;
@@ -1197,6 +1218,57 @@ impl App for EmailApp {
             // /: Search focus
             if ctx.input(|i| i.key_pressed(egui::Key::Slash)) {
                 self.focus_search_requested = true;
+            }
+        }
+
+        // Pending Send (Undo Grace Period) Processing & Floating Bar
+        if let Some(pending) = self.pending_send.clone() {
+            let elapsed = pending.scheduled_time.elapsed();
+            if elapsed >= pending.duration {
+                let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                    draft: pending.draft,
+                    password: pending.password,
+                });
+                self.status_toast = Some(("Email sent successfully!".to_string(), std::time::Instant::now()));
+                self.pending_send = None;
+            } else {
+                let remaining = (pending.duration.as_secs_f32() - elapsed.as_secs_f32()).max(0.0);
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+
+                egui::Area::new(egui::Id::new("undo_send_float_bar"))
+                    .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -24.0))
+                    .order(egui::Order::Foreground)
+                    .show(ctx, |ui| {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(26, 34, 52))
+                            .stroke(egui::Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY))
+                            .rounding(egui::Rounding::same(8.0))
+                            .inner_margin(egui::Margin::symmetric(18.0, 10.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("✉").size(16.0));
+                                    ui.label(
+                                        RichText::new(format!("Sending email in {:.1}s...", remaining))
+                                            .size(13.0)
+                                            .color(egui::Color32::WHITE),
+                                    );
+                                    ui.add_space(8.0);
+                                    if ui.button(RichText::new("↩ Undo Send").size(12.0).strong().color(AppTheme::ACCENT_WARNING)).clicked() {
+                                        self.compose_view.restore_from_draft(&pending.draft);
+                                        self.pending_send = None;
+                                        self.status_toast = Some(("Sending undone. Draft restored.".to_string(), std::time::Instant::now()));
+                                    }
+                                    if ui.button(RichText::new("⚡ Send Now").size(11.5)).clicked() {
+                                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                                            draft: pending.draft,
+                                            password: pending.password,
+                                        });
+                                        self.status_toast = Some(("Email sent!".to_string(), std::time::Instant::now()));
+                                        self.pending_send = None;
+                                    }
+                                });
+                            });
+                    });
             }
         }
 
