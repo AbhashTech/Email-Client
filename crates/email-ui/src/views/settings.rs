@@ -94,7 +94,7 @@ impl SettingsView {
                 // Top Navigation Tabs
                 ui.horizontal(|ui| {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Accounts, "📬 Accounts");
-                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Signatures, "✍ Signatures");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Signatures, "📝 Signatures");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Templates, "📋 Templates & Snippets");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
                 });
@@ -316,7 +316,7 @@ impl SettingsView {
             for sig in signatures.iter() {
                 ui.horizontal(|ui| {
                     let default_tag = if sig.is_default { " [Default]" } else { "" };
-                    ui.label(RichText::new(format!("✍ {}{}", sig.name, default_tag)).strong().size(13.0));
+                    ui.label(RichText::new(format!("📝 {}{}", sig.name, default_tag)).strong().size(13.0));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {

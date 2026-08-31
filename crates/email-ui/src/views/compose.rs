@@ -195,7 +195,7 @@ impl ComposeView {
                         };
 
                         egui::ComboBox::from_id_salt("sig_picker_combo")
-                            .selected_text(format!("✍ Sig: {}", selected_sig_label))
+                            .selected_text(format!("Sig: {}", selected_sig_label))
                             .show_ui(ui, |ui| {
                                 if ui.selectable_label(self.selected_signature_id.is_none(), "None (No Signature)").clicked() {
                                     self.selected_signature_id = None;
@@ -278,7 +278,7 @@ impl ComposeView {
                         if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list").clicked() {
                             self.body_plain.push_str("\n • ");
                         }
-                        if ui.button(RichText::new("❝ Quote").size(11.0)).on_hover_text("Blockquote").clicked() {
+                        if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote").clicked() {
                             self.body_plain.push_str("\n > ");
                         }
                     } else {
@@ -287,166 +287,177 @@ impl ComposeView {
                 });
 
                 ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(2.0);
 
-                // 5. Body Text Editor
-                let text_height = ui.available_height() - 90.0;
-                ui.add_sized(
-                    [ui.available_width(), text_height.max(120.0)],
-                    egui::TextEdit::multiline(&mut self.body_plain)
-                        .hint_text("Type your message here...")
-                        .font(egui::TextStyle::Body),
-                );
+                // 5. Docked Bottom Action Bar & Resizable Editor Body
+                // Using bottom_up layout guarantees the Send button is always pinned & visible
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.add_space(4.0);
 
-                // 6. Attached Signature Preview Badge
-                if let Some(ref sig_id) = self.selected_signature_id {
-                    if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("✍ Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
-                            ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
-                            let plain_preview = email_html::html_to_plain_text(&sig.content_html);
-                            let truncated = if plain_preview.len() > 60 {
-                                format!("{}...", &plain_preview[..57])
-                            } else {
-                                plain_preview
-                            };
-                            ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
-                        });
-                    }
-                }
-
-                // 7. Quoted Previous Message Preview
-                if let Some(ref quote) = self.reply_quote {
-                    ui.collapsing(RichText::new("📜 Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
-                        egui::ScrollArea::vertical().max_height(60.0).show(ui, |ui| {
-                            ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
-                        });
-                    });
-                }
-
-                if let Some(ref err) = self.error_msg {
-                    ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
-                }
-
-                ui.add_space(6.0);
-
-                // 8. Send / Discard Action Bar
-                ui.horizontal(|ui| {
-                    let send_btn_label = if self.send_as_html {
-                        "🚀 Send (HTML)"
-                    } else {
-                        "🚀 Send (Plain Text)"
-                    };
-
-                    let send_btn = egui::Button::new(
-                        RichText::new(send_btn_label)
-                            .size(13.0)
-                            .strong()
-                            .color(Color32::WHITE),
-                    )
-                    .fill(AppTheme::ACCENT_PRIMARY)
-                    .rounding(Rounding::same(6.0));
-
-                    if ui.add(send_btn).clicked() {
-                        if self.to_input.trim().is_empty() {
-                            self.error_msg = Some("Please specify at least one recipient email address.".to_string());
+                    // Send / Discard Action Bar
+                    ui.horizontal(|ui| {
+                        let send_btn_label = if self.send_as_html {
+                            "🚀 Send (HTML)"
                         } else {
-                            let to_list: Vec<Recipient> = self
-                                .to_input
-                                .split(',')
-                                .map(|s| s.trim())
-                                .filter(|s| !s.is_empty())
-                                .map(|email| Recipient::new(None, email.to_string()))
-                                .collect();
+                            "🚀 Send (Plain Text)"
+                        };
 
-                            let cc_list: Vec<Recipient> = self
-                                .cc_input
-                                .split(',')
-                                .map(|s| s.trim())
-                                .filter(|s| !s.is_empty())
-                                .map(|email| Recipient::new(None, email.to_string()))
-                                .collect();
+                        let send_btn = egui::Button::new(
+                            RichText::new(send_btn_label)
+                                .size(13.0)
+                                .strong()
+                                .color(Color32::WHITE),
+                        )
+                        .fill(AppTheme::ACCENT_PRIMARY)
+                        .rounding(Rounding::same(6.0));
 
-                            let bcc_list: Vec<Recipient> = self
-                                .bcc_input
-                                .split(',')
-                                .map(|s| s.trim())
-                                .filter(|s| !s.is_empty())
-                                .map(|email| Recipient::new(None, email.to_string()))
-                                .collect();
-
-                            // Build signature parts
-                            let attached_sig = self.selected_signature_id.as_ref().and_then(|id| {
-                                signatures.iter().find(|s| &s.id == id)
-                            });
-
-                            let (sig_plain, sig_html) = if let Some(sig) = attached_sig {
-                                let clean_html = email_html::sanitize_raw_html(&sig.content_html);
-                                let plain = email_html::html_to_plain_text(&sig.content_html);
-                                (format!("\n\n--\n{}", plain), format!("<br/><br/>--<br/>{}", clean_html))
+                        if ui.add(send_btn).clicked() {
+                            if self.to_input.trim().is_empty() {
+                                self.error_msg = Some("Please specify at least one recipient email address.".to_string());
                             } else {
-                                (String::new(), String::new())
-                            };
+                                let to_list: Vec<Recipient> = self
+                                    .to_input
+                                    .split(',')
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|email| Recipient::new(None, email.to_string()))
+                                    .collect();
 
-                            // Build quote parts
-                            let (quote_plain, quote_html) = if let Some(ref quote) = self.reply_quote {
-                                (
-                                    format!("\n\n---\nOn previous discussion, wrote:\n{}", quote),
-                                    format!("<br/><br/>---<br/>On previous discussion, wrote:<br/>{}", quote.replace('\n', "<br/>"))
-                                )
-                            } else {
-                                (String::new(), String::new())
-                            };
+                                let cc_list: Vec<Recipient> = self
+                                    .cc_input
+                                    .split(',')
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|email| Recipient::new(None, email.to_string()))
+                                    .collect();
 
-                            let (body_plain, body_html) = if self.send_as_html {
-                                let user_plain = email_html::html_to_plain_text(&self.body_plain);
-                                let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-                                let html = format!(
-                                    "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
-                                    self.body_plain.replace('\n', "<br/>"),
-                                    sig_html,
-                                    quote_html
-                                );
-                                (plain, Some(html))
-                            } else {
-                                let user_plain = email_html::html_to_plain_text(&self.body_plain);
-                                let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-                                (plain, None)
-                            };
+                                let bcc_list: Vec<Recipient> = self
+                                    .bcc_input
+                                    .split(',')
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|email| Recipient::new(None, email.to_string()))
+                                    .collect();
 
-                            let draft = OutgoingDraft {
-                                account_id: self.selected_account_id.clone(),
-                                to: to_list,
-                                cc: cc_list,
-                                bcc: bcc_list,
-                                subject: self.subject.clone(),
-                                body_plain,
-                                body_html,
-                                in_reply_to: self.in_reply_to.clone(),
-                                references: self.references.clone(),
-                            };
+                                // Build signature parts
+                                let attached_sig = self.selected_signature_id.as_ref().and_then(|id| {
+                                    signatures.iter().find(|s| &s.id == id)
+                                });
 
-                            let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
-                            if let Some(acc) = current_account {
-                                match keyring.get_credential(&acc.credential_key) {
-                                    Ok(pwd) => {
-                                        let _ = cmd_tx.send(SyncCommand::SendEmail {
-                                            draft,
-                                            password: pwd,
-                                        });
-                                        self.is_open = false;
-                                    }
-                                    Err(e) => {
-                                        self.error_msg = Some(format!("Could not retrieve account credentials from OS Keyring: {}", e));
+                                let (sig_plain, sig_html) = if let Some(sig) = attached_sig {
+                                    let clean_html = email_html::sanitize_raw_html(&sig.content_html);
+                                    let plain = email_html::html_to_plain_text(&sig.content_html);
+                                    (format!("\n\n--\n{}", plain), format!("<br/><br/>--<br/>{}", clean_html))
+                                } else {
+                                    (String::new(), String::new())
+                                };
+
+                                // Build quote parts
+                                let (quote_plain, quote_html) = if let Some(ref quote) = self.reply_quote {
+                                    (
+                                        format!("\n\n---\nOn previous discussion, wrote:\n{}", quote),
+                                        format!("<br/><br/>---<br/>On previous discussion, wrote:<br/>{}", quote.replace('\n', "<br/>"))
+                                    )
+                                } else {
+                                    (String::new(), String::new())
+                                };
+
+                                let (body_plain, body_html) = if self.send_as_html {
+                                    let user_plain = email_html::html_to_plain_text(&self.body_plain);
+                                    let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+                                    let html = format!(
+                                        "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
+                                        self.body_plain.replace('\n', "<br/>"),
+                                        sig_html,
+                                        quote_html
+                                    );
+                                    (plain, Some(html))
+                                } else {
+                                    let user_plain = email_html::html_to_plain_text(&self.body_plain);
+                                    let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+                                    (plain, None)
+                                };
+
+                                let draft = OutgoingDraft {
+                                    account_id: self.selected_account_id.clone(),
+                                    to: to_list,
+                                    cc: cc_list,
+                                    bcc: bcc_list,
+                                    subject: self.subject.clone(),
+                                    body_plain,
+                                    body_html,
+                                    in_reply_to: self.in_reply_to.clone(),
+                                    references: self.references.clone(),
+                                };
+
+                                let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
+                                if let Some(acc) = current_account {
+                                    match keyring.get_credential(&acc.credential_key) {
+                                        Ok(pwd) => {
+                                            let _ = cmd_tx.send(SyncCommand::SendEmail {
+                                                draft,
+                                                password: pwd,
+                                            });
+                                            self.is_open = false;
+                                        }
+                                        Err(e) => {
+                                            self.error_msg = Some(format!("Could not retrieve account credentials from OS Keyring: {}", e));
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("Discard").size(12.0)).clicked() {
+                                self.is_open = false;
+                            }
+                        });
+                    });
+
+                    if let Some(ref err) = self.error_msg {
+                        ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
                     }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("Discard").size(12.0)).clicked() {
-                            self.is_open = false;
+                    // Attached Signature preview info
+                    if let Some(ref sig_id) = self.selected_signature_id {
+                        if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
+                                ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
+                                let plain_preview = email_html::html_to_plain_text(&sig.content_html);
+                                let truncated = if plain_preview.len() > 50 {
+                                    format!("{}...", &plain_preview[..47])
+                                } else {
+                                    plain_preview
+                                };
+                                ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
+                            });
                         }
+                    }
+
+                    // Quoted Previous Message expandable
+                    if let Some(ref quote) = self.reply_quote {
+                        ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
+                            egui::ScrollArea::vertical().max_height(60.0).show(ui, |ui| {
+                                ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
+                            });
+                        });
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // Main Multiline Body Editor (fills all remaining available height)
+                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                        let avail_size = ui.available_size();
+                        ui.add_sized(
+                            avail_size,
+                            egui::TextEdit::multiline(&mut self.body_plain)
+                                .hint_text("Type your message here...")
+                                .font(egui::TextStyle::Body),
+                        );
                     });
                 });
             });
