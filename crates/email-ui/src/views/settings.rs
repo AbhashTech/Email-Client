@@ -1,13 +1,18 @@
-use crate::theme::AppTheme;
+use crate::{get_database_path, load_app_config, save_app_config};
+use crate::theme::{
+    delete_custom_theme, get_config_dir, get_themes_dir, load_custom_themes, save_custom_theme,
+    AppTheme,
+};
 use egui::{Color32, RichText, Rounding, ScrollArea, Stroke, Ui, Vec2, Window};
 use email_core::events::SyncCommand;
-use email_core::models::{Account, Folder, Signature, Template};
+use email_core::models::{
+    Account, AccountBackup, AppBackup, CustomTheme, Folder, SettingsMetadata, Signature, Template,
+};
 use email_keychain::CredentialStore;
 use email_storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SettingsTab {
@@ -16,6 +21,7 @@ pub enum SettingsTab {
     Templates,
     Appearance,
     General,
+    Backup,
 }
 
 pub struct SettingsView {
@@ -33,6 +39,24 @@ pub struct SettingsView {
     pub new_sig_html: String,
     pub new_sig_is_default: bool,
 
+    // Custom Theme Creator
+    pub new_theme_name: String,
+    pub new_theme_desc: String,
+    pub new_theme_is_dark: bool,
+    pub new_theme_bg_app: [u8; 3],
+    pub new_theme_bg_list: [u8; 3],
+    pub new_theme_bg_view: [u8; 3],
+    pub new_theme_bg_card: [u8; 3],
+    pub new_theme_bg_hover: [u8; 3],
+    pub new_theme_bg_selected: [u8; 3],
+    pub new_theme_accent_primary: [u8; 3],
+    pub new_theme_accent_hover: [u8; 3],
+    pub new_theme_border: [u8; 3],
+    pub new_theme_text_primary: [u8; 3],
+    pub new_theme_text_secondary: [u8; 3],
+    pub active_custom_theme_id: Option<String>,
+    pub custom_themes: Vec<CustomTheme>,
+
     // Feedback message
     pub status_msg: Option<(bool, String)>,
 }
@@ -49,6 +73,22 @@ impl SettingsView {
             new_sig_name: String::new(),
             new_sig_html: "<b>Best regards,</b><br/>My Name".to_string(),
             new_sig_is_default: false,
+            new_theme_name: "My Gruvbox Custom".to_string(),
+            new_theme_desc: "Custom retro warm palette".to_string(),
+            new_theme_is_dark: true,
+            new_theme_bg_app: [40, 40, 40],
+            new_theme_bg_list: [50, 48, 47],
+            new_theme_bg_view: [60, 56, 54],
+            new_theme_bg_card: [80, 73, 69],
+            new_theme_bg_hover: [102, 92, 84],
+            new_theme_bg_selected: [214, 93, 14],
+            new_theme_accent_primary: [250, 189, 47],
+            new_theme_accent_hover: [254, 128, 25],
+            new_theme_border: [80, 73, 69],
+            new_theme_text_primary: [235, 219, 178],
+            new_theme_text_secondary: [213, 196, 161],
+            active_custom_theme_id: None,
+            custom_themes: Vec::new(),
             status_msg: None,
         }
     }
@@ -56,6 +96,7 @@ impl SettingsView {
     pub fn open(&mut self) {
         self.is_open = true;
         self.status_msg = None;
+        self.custom_themes = load_custom_themes();
     }
 
     #[allow(dead_code)]
@@ -100,6 +141,7 @@ impl SettingsView {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Templates, "📋 Templates & Snippets");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Appearance, "🎨 Appearance");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Backup, "💾 Backup & Restore");
                 });
 
                 ui.add_space(6.0);
@@ -146,6 +188,9 @@ impl SettingsView {
                         }
                         SettingsTab::General => {
                             self.show_general_tab(ui, accounts, storage);
+                        }
+                        SettingsTab::Backup => {
+                            self.show_backup_tab(ui, accounts, templates, signatures, storage, on_data_changed);
                         }
                     }
                 });
@@ -472,11 +517,14 @@ impl SettingsView {
     ) {
         ui.heading(RichText::new("Theme & Visual Style").size(16.0).color(AppTheme::TEXT_PRIMARY));
         ui.add_space(4.0);
-        ui.label(RichText::new("Choose a theme preset tailored for productivity, low-light environments, or high-contrast OLED displays.").size(12.0).color(AppTheme::TEXT_MUTED));
+        ui.label(RichText::new("Choose a built-in theme preset or design your own custom theme saved to OS configuration.").size(12.0).color(AppTheme::TEXT_MUTED));
         ui.add_space(14.0);
 
+        ui.label(RichText::new("BUILT-IN PRESETS").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.add_space(6.0);
+
         for preset in crate::theme::ThemePreset::all() {
-            let is_selected = *current_theme == *preset;
+            let is_selected = self.active_custom_theme_id.is_none() && *current_theme == *preset;
             let border_color = if is_selected { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
 
             egui::Frame::none()
@@ -500,24 +548,350 @@ impl SettingsView {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if is_selected {
                                 ui.label(RichText::new("Applied").size(12.0).color(AppTheme::ACCENT_PRIMARY));
-                            } else if ui.button(RichText::new("Apply Theme").size(12.0)).clicked() {
-                                *current_theme = *preset;
-                                AppTheme::apply_preset(ctx, *preset);
-                                self.status_msg = Some((true, format!("Switched to {} theme.", preset.display_name())));
+                            } else {
+                                let btn = ui.button(RichText::new("Apply Theme").size(12.0));
+                                if btn.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if btn.clicked() {
+                                    self.active_custom_theme_id = None;
+                                    *current_theme = *preset;
+                                    AppTheme::apply_preset(ctx, *preset);
+                                    self.status_msg = Some((true, format!("Switched to {} theme.", preset.display_name())));
+                                }
                             }
                         });
                     });
                 });
 
-            ui.add_space(8.0);
+            ui.add_space(6.0);
         }
+
+        // Custom Themes Section
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("CUSTOM USER THEMES").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(RichText::new("🔄 Refresh Themes").size(11.0)).clicked() {
+                    self.custom_themes = load_custom_themes();
+                    self.status_msg = Some((true, format!("Loaded {} custom themes from config directory.", self.custom_themes.len())));
+                }
+            });
+        });
+        ui.add_space(6.0);
+
+        if self.custom_themes.is_empty() {
+            ui.label(RichText::new("No custom themes created yet. Use the editor below to create one!").size(12.0).italics().color(AppTheme::TEXT_MUTED));
+        } else {
+            for ct in self.custom_themes.clone() {
+                let is_active = self.active_custom_theme_id.as_deref() == Some(&ct.id);
+                let border_color = if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
+
+                egui::Frame::none()
+                    .fill(if is_active { AppTheme::BG_HOVER } else { AppTheme::BG_CARD })
+                    .stroke(Stroke::new(if is_active { 1.5_f32 } else { 1.0_f32 }, border_color))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Color swatches preview
+                            let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(54.0, 24.0), egui::Sense::hover());
+                            let r1 = egui::Rect::from_min_size(swatch_rect.min, Vec2::new(18.0, 24.0));
+                            let r2 = egui::Rect::from_min_size(swatch_rect.min + Vec2::new(18.0, 0.0), Vec2::new(18.0, 24.0));
+                            let r3 = egui::Rect::from_min_size(swatch_rect.min + Vec2::new(36.0, 0.0), Vec2::new(18.0, 24.0));
+                            ui.painter().rect_filled(r1, Rounding::ZERO, Color32::from_rgb(ct.bg_app[0], ct.bg_app[1], ct.bg_app[2]));
+                            ui.painter().rect_filled(r2, Rounding::ZERO, Color32::from_rgb(ct.bg_card[0], ct.bg_card[1], ct.bg_card[2]));
+                            ui.painter().rect_filled(r3, Rounding::ZERO, Color32::from_rgb(ct.accent_primary[0], ct.accent_primary[1], ct.accent_primary[2]));
+                            ui.painter().rect_stroke(swatch_rect, Rounding::same(4.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+
+                            ui.add_space(8.0);
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(&ct.name).size(13.5).strong().color(if is_active { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_PRIMARY }));
+                                    if is_active {
+                                        ui.label(RichText::new("✓ Active").size(11.0).strong().color(AppTheme::ACCENT_SUCCESS));
+                                    }
+                                });
+                                ui.add_space(2.0);
+                                ui.label(RichText::new(format!("{} • Saved to OS Config ({}.json)", ct.description, ct.id)).size(11.0).color(AppTheme::TEXT_MUTED));
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(RichText::new("🗑 Delete").size(11.5).color(AppTheme::ACCENT_DANGER)).clicked() {
+                                    let _ = delete_custom_theme(&ct.id);
+                                    self.custom_themes = load_custom_themes();
+                                    self.status_msg = Some((true, format!("Deleted custom theme '{}'.", ct.name)));
+                                }
+                                if is_active {
+                                    ui.label(RichText::new("Applied").size(12.0).color(AppTheme::ACCENT_PRIMARY));
+                                } else {
+                                    let btn = ui.button(RichText::new("Apply Theme").size(12.0));
+                                    if btn.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    }
+                                    if btn.clicked() {
+                                        self.active_custom_theme_id = Some(ct.id.clone());
+                                        AppTheme::apply_custom(ctx, &ct);
+                                        self.status_msg = Some((true, format!("Applied custom theme '{}'.", ct.name)));
+                                    }
+                                }
+                            });
+                        });
+                    });
+
+                ui.add_space(6.0);
+            }
+        }
+
+        // Custom Theme Creator Form
+        ui.add_space(16.0);
+        ui.label(RichText::new("🎨 CREATE / CUSTOMIZE THEME").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.add_space(4.0);
+        ui.label(RichText::new(format!("Themes are saved as individual JSON files in: {}", get_themes_dir().display())).size(11.0).color(AppTheme::TEXT_MUTED));
+        ui.add_space(8.0);
+
+        // Quick Starter Presets
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Start with palette:").size(11.5).color(AppTheme::TEXT_SECONDARY));
+            if ui.button("Gruvbox Warm").clicked() {
+                self.new_theme_name = "Gruvbox Custom".to_string();
+                self.new_theme_desc = "Warm retro groove dark palette".to_string();
+                self.new_theme_is_dark = true;
+                self.new_theme_bg_app = [40, 40, 40];
+                self.new_theme_bg_list = [50, 48, 47];
+                self.new_theme_bg_view = [60, 56, 54];
+                self.new_theme_bg_card = [80, 73, 69];
+                self.new_theme_bg_hover = [102, 92, 84];
+                self.new_theme_bg_selected = [214, 93, 14];
+                self.new_theme_accent_primary = [250, 189, 47];
+                self.new_theme_accent_hover = [254, 128, 25];
+                self.new_theme_border = [80, 73, 69];
+                self.new_theme_text_primary = [235, 219, 178];
+                self.new_theme_text_secondary = [213, 196, 161];
+            }
+            if ui.button("Nord Frost").clicked() {
+                self.new_theme_name = "Nord Custom".to_string();
+                self.new_theme_desc = "Arctic blue dark palette".to_string();
+                self.new_theme_is_dark = true;
+                self.new_theme_bg_app = [46, 52, 64];
+                self.new_theme_bg_list = [59, 66, 82];
+                self.new_theme_bg_view = [67, 76, 94];
+                self.new_theme_bg_card = [76, 86, 106];
+                self.new_theme_bg_hover = [94, 106, 130];
+                self.new_theme_bg_selected = [129, 161, 193];
+                self.new_theme_accent_primary = [136, 192, 208];
+                self.new_theme_accent_hover = [143, 188, 187];
+                self.new_theme_border = [76, 86, 106];
+                self.new_theme_text_primary = [236, 239, 244];
+                self.new_theme_text_secondary = [216, 222, 233];
+            }
+            if ui.button("Neon Cyberpunk").clicked() {
+                self.new_theme_name = "Cyberpunk Neon".to_string();
+                self.new_theme_desc = "High-contrast dark synthwave palette".to_string();
+                self.new_theme_is_dark = true;
+                self.new_theme_bg_app = [18, 16, 32];
+                self.new_theme_bg_list = [28, 22, 48];
+                self.new_theme_bg_view = [36, 28, 62];
+                self.new_theme_bg_card = [50, 38, 86];
+                self.new_theme_bg_hover = [70, 52, 118];
+                self.new_theme_bg_selected = [160, 32, 240];
+                self.new_theme_accent_primary = [255, 0, 128];
+                self.new_theme_accent_hover = [0, 255, 230];
+                self.new_theme_border = [80, 56, 130];
+                self.new_theme_text_primary = [250, 240, 255];
+                self.new_theme_text_secondary = [200, 180, 230];
+            }
+        });
+        ui.add_space(10.0);
+
+        egui::Grid::new("custom_theme_creator_grid")
+            .num_columns(2)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Theme Name:");
+                ui.text_edit_singleline(&mut self.new_theme_name);
+                ui.end_row();
+
+                ui.label("Description:");
+                ui.text_edit_singleline(&mut self.new_theme_desc);
+                ui.end_row();
+
+                ui.label("Dark Mode Base:");
+                ui.checkbox(&mut self.new_theme_is_dark, "Enable Dark Visuals Base");
+                ui.end_row();
+
+                ui.label("App Background:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_app);
+                ui.end_row();
+
+                ui.label("List / Sidebar Surface:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_list);
+                ui.end_row();
+
+                ui.label("Reading Pane Surface:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_view);
+                ui.end_row();
+
+                ui.label("Card Surface:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_card);
+                ui.end_row();
+
+                ui.label("Hover State:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_hover);
+                ui.end_row();
+
+                ui.label("Selected Highlight:");
+                ui.color_edit_button_srgb(&mut self.new_theme_bg_selected);
+                ui.end_row();
+
+                ui.label("Primary Accent:");
+                ui.color_edit_button_srgb(&mut self.new_theme_accent_primary);
+                ui.end_row();
+
+                ui.label("Accent Hover / Secondary:");
+                ui.color_edit_button_srgb(&mut self.new_theme_accent_hover);
+                ui.end_row();
+
+                ui.label("Border Color:");
+                ui.color_edit_button_srgb(&mut self.new_theme_border);
+                ui.end_row();
+
+                ui.label("Primary Text:");
+                ui.color_edit_button_srgb(&mut self.new_theme_text_primary);
+                ui.end_row();
+
+                ui.label("Secondary Text:");
+                ui.color_edit_button_srgb(&mut self.new_theme_text_secondary);
+                ui.end_row();
+            });
+
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if ui.button(RichText::new("💾 Save & Export Theme JSON").strong()).clicked() {
+                if self.new_theme_name.trim().is_empty() {
+                    self.status_msg = Some((false, "Please provide a valid theme name.".to_string()));
+                } else {
+                    let theme = CustomTheme::new(
+                        self.new_theme_name.clone(),
+                        self.new_theme_desc.clone(),
+                        self.new_theme_is_dark,
+                        self.new_theme_bg_app,
+                        self.new_theme_bg_list,
+                        self.new_theme_bg_view,
+                        self.new_theme_bg_card,
+                        self.new_theme_bg_hover,
+                        self.new_theme_bg_selected,
+                        self.new_theme_accent_primary,
+                        self.new_theme_accent_hover,
+                        self.new_theme_border,
+                        self.new_theme_text_primary,
+                        self.new_theme_text_secondary,
+                    );
+
+                    match save_custom_theme(&theme) {
+                        Ok(path) => {
+                            self.custom_themes = load_custom_themes();
+                            self.active_custom_theme_id = Some(theme.id.clone());
+                            AppTheme::apply_custom(ctx, &theme);
+                            self.status_msg = Some((true, format!("Saved & applied theme '{}' at {:?}", theme.name, path)));
+                        }
+                        Err(e) => {
+                            self.status_msg = Some((false, e));
+                        }
+                    }
+                }
+            }
+
+            if ui.button("👁 Live Preview Palette").clicked() {
+                let temp_theme = CustomTheme::new(
+                    self.new_theme_name.clone(),
+                    self.new_theme_desc.clone(),
+                    self.new_theme_is_dark,
+                    self.new_theme_bg_app,
+                    self.new_theme_bg_list,
+                    self.new_theme_bg_view,
+                    self.new_theme_bg_card,
+                    self.new_theme_bg_hover,
+                    self.new_theme_bg_selected,
+                    self.new_theme_accent_primary,
+                    self.new_theme_accent_hover,
+                    self.new_theme_border,
+                    self.new_theme_text_primary,
+                    self.new_theme_text_secondary,
+                );
+                AppTheme::apply_custom(ctx, &temp_theme);
+                self.status_msg = Some((true, "Applied live preview of custom palette.".to_string()));
+            }
+        });
     }
 
     fn show_general_tab(&mut self, ui: &mut Ui, accounts: &[Account], _storage: &Storage) {
-
         ui.heading(RichText::new("Application & Storage").size(16.0).color(AppTheme::TEXT_PRIMARY));
         ui.add_space(10.0);
 
+        let active_db = get_database_path();
+        let config_dir = get_config_dir();
+        let themes_dir = get_themes_dir();
+
+        ui.label(RichText::new("STORAGE & FILE LOCATIONS").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.add_space(6.0);
+
+        egui::Frame::none()
+            .fill(AppTheme::BG_CARD)
+            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("• Active SQLite Database:").strong().color(AppTheme::TEXT_PRIMARY));
+                ui.label(RichText::new(format!("{}", active_db.display())).size(11.5).color(AppTheme::ACCENT_HOVER));
+                ui.add_space(4.0);
+
+                ui.label(RichText::new("• OS Config Directory:").strong().color(AppTheme::TEXT_PRIMARY));
+                ui.label(RichText::new(format!("{}", config_dir.display())).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                ui.add_space(4.0);
+
+                ui.label(RichText::new("• Custom Themes Directory:").strong().color(AppTheme::TEXT_PRIMARY));
+                ui.label(RichText::new(format!("{}", themes_dir.display())).size(11.5).color(AppTheme::TEXT_SECONDARY));
+                ui.add_space(10.0);
+
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("📁 Relocate / Move Data Directory").strong()).clicked() {
+                        let current_db_path = active_db.clone();
+                        if let Some(target_dir) = rfd::FileDialog::new().set_title("Select New Data Directory").pick_folder() {
+                            let target_db = target_dir.join("email_client.db");
+                            if current_db_path.exists() && current_db_path != target_db {
+                                let _ = std::fs::copy(&current_db_path, &target_db);
+                                // Also copy WAL / SHM files if present
+                                let wal_src = current_db_path.with_extension("db-wal");
+                                if wal_src.exists() {
+                                    let _ = std::fs::copy(&wal_src, target_dir.join("email_client.db-wal"));
+                                }
+                                let shm_src = current_db_path.with_extension("db-shm");
+                                if shm_src.exists() {
+                                    let _ = std::fs::copy(&shm_src, target_dir.join("email_client.db-shm"));
+                                }
+                            }
+
+                            let mut cfg = load_app_config();
+                            cfg.custom_data_dir = Some(target_dir.to_string_lossy().to_string());
+                            if let Err(e) = save_app_config(&cfg) {
+                                self.status_msg = Some((false, format!("Failed to save config: {}", e)));
+                            } else {
+                                self.status_msg = Some((true, format!("Data relocated to {:?}. Please restart the application to use the new directory.", target_dir)));
+                            }
+                        }
+                    }
+
+                    if ui.button("↺ Reset to Default OS Path").clicked() {
+                        let mut cfg = load_app_config();
+                        cfg.custom_data_dir = None;
+                        let _ = save_app_config(&cfg);
+                        self.status_msg = Some((true, "Reset data storage path to default OS directory. Restart app to apply.".to_string()));
+                    }
+                });
+            });
+
+        ui.add_space(14.0);
         ui.label(RichText::new("PERFORMANCE & ARCHITECTURE").size(11.0).strong().color(AppTheme::TEXT_MUTED));
         ui.add_space(4.0);
         ui.label("• Architecture: Fully native Rust multi-crate engine (Zero Chromium / Zero Electron)");
@@ -535,5 +909,201 @@ impl SettingsView {
         ui.label(RichText::new("SYSTEM TRAY").size(11.0).strong().color(AppTheme::TEXT_MUTED));
         ui.add_space(4.0);
         ui.label("• StatusNotifierItem DBus tray enabled with live unread badge updates.");
+    }
+
+    fn show_backup_tab(
+        &mut self,
+        ui: &mut Ui,
+        accounts: &[Account],
+        templates: &[Template],
+        signatures: &[Signature],
+        storage: &Storage,
+        on_data_changed: &mut bool,
+    ) {
+        ui.heading(RichText::new("Backup & Restore Data").size(16.0).color(AppTheme::TEXT_PRIMARY));
+        ui.add_space(4.0);
+        ui.label(RichText::new("Create portable complete backups of your email accounts configuration, themes, templates, signatures, and preferences.").size(12.0).color(AppTheme::TEXT_MUTED));
+        ui.add_space(14.0);
+
+        egui::Frame::none()
+            .fill(AppTheme::BG_CARD)
+            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("🔒 PRIVACY & SECURITY GUARANTEE").size(11.0).strong().color(AppTheme::ACCENT_SUCCESS));
+                ui.add_space(4.0);
+                ui.label("• Backups include full account IMAP/SMTP endpoints, security settings, and folder configurations.");
+                ui.label("• Backups strictly NEVER include plaintext passwords or OS keyring keys.");
+                ui.label("• When restoring on a new machine, you will simply enter passwords once for each account.");
+            });
+
+        ui.add_space(14.0);
+        ui.label(RichText::new("BACKUP CONTENTS SUMMARY").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        ui.add_space(4.0);
+        ui.label(format!("• Email Accounts: {} configured", accounts.len()));
+        ui.label(format!("• Quick Templates: {} templates", templates.len()));
+        ui.label(format!("• Signatures: {} signatures", signatures.len()));
+        ui.label(format!("• Custom Themes: {} themes in config directory", self.custom_themes.len()));
+
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            // Export Full Backup
+            if ui.button(RichText::new("💾 Export Full Backup (*.json)").strong().size(13.0)).clicked() {
+                let backup_accounts: Vec<AccountBackup> = accounts.iter().map(AccountBackup::from).collect();
+                let backup = AppBackup {
+                    format_version: 1,
+                    app_name: "AT-mail-rs".to_string(),
+                    exported_at: chrono::Utc::now().timestamp(),
+                    accounts: backup_accounts,
+                    templates: templates.to_vec(),
+                    signatures: signatures.to_vec(),
+                    custom_themes: self.custom_themes.clone(),
+                    settings: SettingsMetadata {
+                        active_theme: self.active_custom_theme_id.clone(),
+                        export_version: 1,
+                    },
+                };
+
+                let now_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                let default_fname = format!("at_mail_backup_{}.json", now_str);
+
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Export AT-mail-rs Backup")
+                    .set_file_name(&default_fname)
+                    .add_filter("JSON Backup (*.json)", &["json"])
+                    .save_file()
+                {
+                    match serde_json::to_string_pretty(&backup) {
+                        Ok(json_content) => {
+                            if let Err(e) = std::fs::write(&path, json_content) {
+                                self.status_msg = Some((false, format!("Failed to write backup file: {}", e)));
+                            } else {
+                                self.status_msg = Some((true, format!("Successfully exported complete backup to {:?}", path)));
+                            }
+                        }
+                        Err(e) => {
+                            self.status_msg = Some((false, format!("Failed to serialize backup: {}", e)));
+                        }
+                    }
+                }
+            }
+
+            ui.add_space(8.0);
+
+            // Restore Full Backup
+            if ui.button(RichText::new("📥 Restore From Backup (*.json)").size(13.0)).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Select AT-mail-rs Backup JSON")
+                    .add_filter("JSON Backup (*.json)", &["json"])
+                    .pick_file()
+                {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            match serde_json::from_str::<AppBackup>(&content) {
+                                Ok(backup) => {
+                                    let mut restored_accs = 0;
+                                    let mut restored_tpls = 0;
+                                    let mut restored_sigs = 0;
+                                    let mut restored_themes = 0;
+
+                                    // Restore Accounts (without credentials)
+                                    for ab in &backup.accounts {
+                                        let dummy_acc = Account {
+                                            id: ab.id.clone(),
+                                            name: ab.name.clone(),
+                                            email: ab.email.clone(),
+                                            imap_host: ab.imap_host.clone(),
+                                            imap_port: ab.imap_port,
+                                            imap_security: ab.imap_security,
+                                            smtp_host: ab.smtp_host.clone(),
+                                            smtp_port: ab.smtp_port,
+                                            smtp_security: ab.smtp_security,
+                                            auth_type: ab.auth_type,
+                                            credential_key: format!("mail_acc_{}_secret", ab.id),
+                                            sync_days_window: ab.sync_days_window,
+                                            is_enabled: ab.is_enabled,
+                                            created_at: chrono::Utc::now().timestamp(),
+                                            updated_at: chrono::Utc::now().timestamp(),
+                                        };
+                                        let _ = storage.save_account(&dummy_acc);
+                                        restored_accs += 1;
+                                    }
+
+                                    // Restore Templates
+                                    for t in &backup.templates {
+                                        let _ = storage.save_template(t);
+                                        restored_tpls += 1;
+                                    }
+
+                                    // Restore Signatures
+                                    for s in &backup.signatures {
+                                        let _ = storage.save_signature(s);
+                                        restored_sigs += 1;
+                                    }
+
+                                    // Restore Custom Themes to OS config dir
+                                    for ct in &backup.custom_themes {
+                                        let _ = save_custom_theme(ct);
+                                        restored_themes += 1;
+                                    }
+
+                                    self.custom_themes = load_custom_themes();
+                                    *on_data_changed = true;
+                                    self.status_msg = Some((
+                                        true,
+                                        format!(
+                                            "Restored successfully: {} accounts, {} templates, {} signatures, {} themes.",
+                                            restored_accs, restored_tpls, restored_sigs, restored_themes
+                                        ),
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.status_msg = Some((false, format!("Invalid backup file format: {}", e)));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.status_msg = Some((false, format!("Failed to read backup file: {}", e)));
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_custom_theme_filesystem_crud() {
+        let test_theme = CustomTheme::new(
+            "Unit Test Theme".to_string(),
+            "Theme for testing filesystem storage".to_string(),
+            true,
+            [10, 10, 10],
+            [20, 20, 20],
+            [30, 30, 30],
+            [40, 40, 40],
+            [50, 50, 50],
+            [60, 60, 60],
+            [255, 100, 50],
+            [255, 150, 100],
+            [70, 70, 70],
+            [240, 240, 240],
+            [180, 180, 180],
+        );
+
+        let path = save_custom_theme(&test_theme).expect("Save test theme");
+        assert!(path.exists());
+
+        let all = load_custom_themes();
+        assert!(all.iter().any(|t| t.id == test_theme.id));
+
+        delete_custom_theme(&test_theme.id).expect("Delete test theme");
+        let all_after = load_custom_themes();
+        assert!(!all_after.iter().any(|t| t.id == test_theme.id));
     }
 }

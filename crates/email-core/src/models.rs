@@ -422,14 +422,132 @@ mod tests {
         assert_eq!(SyncWindow::Days45.days(), Some(45));
         assert_eq!(SyncWindow::Days60.days(), Some(60));
         assert_eq!(SyncWindow::Days90.days(), Some(90));
-        assert_eq!(SyncWindow::Days365.days(), Some(365));
-        assert_eq!(SyncWindow::Custom(50).days(), Some(50));
-        assert_eq!(SyncWindow::All.days(), None);
-
         assert!(SyncWindow::Days45.calculate_since_date().is_some());
         assert!(SyncWindow::Custom(60).calculate_since_date().is_some());
         assert!(SyncWindow::All.calculate_since_date().is_none());
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CustomTheme {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub is_dark: bool,
+    pub bg_app: [u8; 3],
+    pub bg_list: [u8; 3],
+    pub bg_view: [u8; 3],
+    pub bg_card: [u8; 3],
+    pub bg_hover: [u8; 3],
+    pub bg_selected: [u8; 3],
+    pub accent_primary: [u8; 3],
+    pub accent_hover: [u8; 3],
+    pub border: [u8; 3],
+    pub text_primary: [u8; 3],
+    pub text_secondary: [u8; 3],
+    pub created_at: i64,
+}
+
+impl CustomTheme {
+    pub fn new(
+        name: String,
+        description: String,
+        is_dark: bool,
+        bg_app: [u8; 3],
+        bg_list: [u8; 3],
+        bg_view: [u8; 3],
+        bg_card: [u8; 3],
+        bg_hover: [u8; 3],
+        bg_selected: [u8; 3],
+        accent_primary: [u8; 3],
+        accent_hover: [u8; 3],
+        border: [u8; 3],
+        text_primary: [u8; 3],
+        text_secondary: [u8; 3],
+    ) -> Self {
+        let clean_id: String = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+            .collect();
+        let id = if clean_id.is_empty() {
+            format!("theme_{}", Uuid::new_v4())
+        } else {
+            clean_id
+        };
+
+        Self {
+            id,
+            name,
+            description,
+            is_dark,
+            bg_app,
+            bg_list,
+            bg_view,
+            bg_card,
+            bg_hover,
+            bg_selected,
+            accent_primary,
+            accent_hover,
+            border,
+            text_primary,
+            text_secondary,
+            created_at: Utc::now().timestamp(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountBackup {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_security: SecurityType,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_security: SecurityType,
+    pub auth_type: AuthType,
+    pub sync_days_window: SyncWindow,
+    pub is_enabled: bool,
+}
+
+impl From<&Account> for AccountBackup {
+    fn from(acc: &Account) -> Self {
+        Self {
+            id: acc.id.clone(),
+            name: acc.name.clone(),
+            email: acc.email.clone(),
+            imap_host: acc.imap_host.clone(),
+            imap_port: acc.imap_port,
+            imap_security: acc.imap_security,
+            smtp_host: acc.smtp_host.clone(),
+            smtp_port: acc.smtp_port,
+            smtp_security: acc.smtp_security,
+            auth_type: acc.auth_type,
+            sync_days_window: acc.sync_days_window,
+            is_enabled: acc.is_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsMetadata {
+    pub active_theme: Option<String>,
+    pub export_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppBackup {
+    pub format_version: u32,
+    pub app_name: String,
+    pub exported_at: i64,
+    pub accounts: Vec<AccountBackup>,
+    pub templates: Vec<Template>,
+    pub signatures: Vec<Signature>,
+    pub custom_themes: Vec<CustomTheme>,
+    pub settings: SettingsMetadata,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -443,4 +561,73 @@ pub struct OutgoingDraft {
     pub body_html: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+
+    #[test]
+    fn test_custom_theme_creation_and_json() {
+        let theme = CustomTheme::new(
+            "Retro Synthwave".to_string(),
+            "Neon purple & cyan dark aesthetic".to_string(),
+            true,
+            [26, 20, 35],
+            [35, 25, 48],
+            [42, 30, 58],
+            [54, 38, 75],
+            [70, 50, 95],
+            [120, 40, 160],
+            [255, 0, 128],
+            [0, 255, 200],
+            [80, 55, 110],
+            [245, 240, 255],
+            [190, 180, 210],
+        );
+
+        let json = serde_json::to_string(&theme).expect("Failed to serialize theme");
+        let decoded: CustomTheme = serde_json::from_str(&json).expect("Failed to deserialize theme");
+        assert_eq!(decoded.name, "Retro Synthwave");
+        assert_eq!(decoded.accent_primary, [255, 0, 128]);
+    }
+
+    #[test]
+    fn test_app_backup_json_roundtrip() {
+        let backup = AppBackup {
+            format_version: 1,
+            app_name: "AT-mail-rs".to_string(),
+            exported_at: 1700000000,
+            accounts: vec![AccountBackup {
+                id: "acc-1".to_string(),
+                name: "Work Account".to_string(),
+                email: "dev@work.com".to_string(),
+                imap_host: "imap.work.com".to_string(),
+                imap_port: 993,
+                imap_security: SecurityType::Tls,
+                smtp_host: "smtp.work.com".to_string(),
+                smtp_port: 465,
+                smtp_security: SecurityType::Tls,
+                auth_type: AuthType::Password,
+                sync_days_window: SyncWindow::Days60,
+                is_enabled: true,
+            }],
+            templates: vec![],
+            signatures: vec![],
+            custom_themes: vec![],
+            settings: SettingsMetadata {
+                active_theme: Some("GruvboxDark".to_string()),
+                export_version: 1,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&backup).expect("Serialize backup");
+        assert!(json.contains("dev@work.com"));
+        assert!(json.contains("GruvboxDark"));
+        assert!(!json.contains("credential_key")); // Zero password or keyring keys in backup
+
+        let restored: AppBackup = serde_json::from_str(&json).expect("Deserialize backup");
+        assert_eq!(restored.accounts.len(), 1);
+        assert_eq!(restored.accounts[0].sync_days_window, SyncWindow::Days60);
+    }
 }

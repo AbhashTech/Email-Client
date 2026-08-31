@@ -101,13 +101,48 @@ fn main() -> Result<(), eframe::Error> {
 }
 
 
-fn get_database_path() -> PathBuf {
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppConfig {
+    pub custom_data_dir: Option<String>,
+    pub active_theme: Option<String>,
+}
+
+pub fn load_app_config() -> AppConfig {
+    let config_path = crate::theme::get_config_dir().join("config.json");
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        if let Ok(cfg) = serde_json::from_str::<AppConfig>(&content) {
+            return cfg;
+        }
+    }
+    AppConfig::default()
+}
+
+pub fn save_app_config(cfg: &AppConfig) -> Result<(), String> {
+    let config_dir = crate::theme::get_config_dir();
+    let _ = std::fs::create_dir_all(&config_dir);
+    let config_path = config_dir.join("config.json");
+    let json = serde_json::to_string_pretty(cfg)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_path, json)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok(())
+}
+
+pub fn get_database_path() -> PathBuf {
+    let cfg = load_app_config();
+    if let Some(custom_dir) = cfg.custom_data_dir {
+        let p = PathBuf::from(custom_dir);
+        let _ = std::fs::create_dir_all(&p);
+        return p.join("email_client.db");
+    }
+
     if let Some(mut dir) = dirs_next().or_else(dirs_fallback) {
         dir.push("at-mail-rs");
         let _ = std::fs::create_dir_all(&dir);
         dir.push("email_client.db");
         dir
-
     } else {
         PathBuf::from("email_client.db")
     }

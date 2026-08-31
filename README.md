@@ -67,14 +67,30 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 🎨 Multi-Theme Engine
+### 🎨 Multi-Theme Engine & Custom Theme Creator
 Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance` or the `Ctrl+K` Command Palette:
-1. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents.
-2. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights.
-3. **Nord Arctic**: Crisp north-bluish dark aesthetic.
-4. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette.
-5. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
-6. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments.
+1. **Gruvbox Retro Dark**: Warm retro groove dark palette with amber and gold accents (`#282828`).
+2. **Gruvbox Retro Light**: Warm retro groove light parchment palette with ochre accents (`#fbf1c7`).
+3. **Gruvbox Auto (System)**: Automatically switches between Gruvbox Dark & Light based on your operating system's dark mode preference.
+4. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents.
+5. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights.
+6. **Nord Arctic**: Crisp north-bluish dark aesthetic.
+7. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette.
+8. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
+9. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments.
+10. **🎨 Custom Theme Creator**: Full interactive color pickers for App Background, Sidebar, Reading Pane, Cards, Accents, Borders, and Text. Custom themes are saved as standalone JSON files in the OS config folder (`~/.config/at-mail-rs/themes/<theme_name>.json`) and can be exported, imported, and applied on the fly.
+
+---
+
+### 📁 Storage Path Inspector & Data Relocation
+- **Path Inspection**: View the exact live filepaths for the SQLite database (`email_client.db`), OS configuration directory (`~/.config/at-mail-rs/`), and custom themes.
+- **📁 Relocate / Move Data Directory**: 1-click migration tool in *Settings -> General & Storage* that safely copies the database and WAL files to any chosen custom directory (e.g. secondary SSD or encrypted vault) and updates the application configuration pointer.
+
+---
+
+### 💾 Complete Application Backup & Restore
+- **🔒 Privacy First**: Exports complete configuration packages while strictly **omitting passwords and keyring secrets**.
+- **Portable JSON Backup**: Exports and imports Email Account endpoints, Custom Themes, Quick Templates, Signatures, and Preferences via *Settings -> 💾 Backup & Restore*.
 
 ---
 
@@ -83,6 +99,12 @@ Export any email directly from the reading pane toolbar (`📤 Export ▾`):
 - **`📄 Markdown (.md)`**: Export with YAML frontmatter headers (Subject, From, To, Cc, Date) and formatted body text.
 - **`🌐 HTML Document (.html)`**: Standalone, styled HTML document viewable in any browser.
 - **`✉ Raw EML (.eml)`**: Standard RFC-822 formatted message file compatible with all standard email clients.
+
+---
+
+### ⏱️ Flexible Download & Sync Windows
+Select how many days of emails to synchronize during account setup or in settings:
+- **7 Days**, **14 Days**, **30 Days**, **45 Days**, **60 Days**, **90 Days**, **365 Days (1 Year)**, **Custom Days...** (numeric stepper for any custom duration), or **All History**.
 
 ---
 
