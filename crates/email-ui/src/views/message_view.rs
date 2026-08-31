@@ -79,7 +79,7 @@ impl MessageViewPane {
             }
 
             // Snooze Dropdown
-            let snooze_title = if msg.is_snoozed() { "💤 Snoozed ▾" } else { "💤 Snooze ▾" };
+            let snooze_title = if msg.is_snoozed() { "💤 Snoozed" } else { "💤 Snooze" };
             egui::ComboBox::from_id_salt(format!("snooze_combo_{}", msg.id))
                 .selected_text(RichText::new(snooze_title).size(12.0))
                 .show_ui(ui, |ui| {
@@ -433,7 +433,190 @@ impl MessageViewPane {
                         }
 
                         if is_expanded {
-                            ui.add_space(10.0);
+                            ui.add_space(6.0);
+
+                            // Per-message action toolbar for this specific email in the thread
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                                ui.spacing_mut().button_padding = Vec2::new(6.0, 3.0);
+
+                                if item_msg.is_draft {
+                                    let edit_btn = egui::Button::new(RichText::new("✏ Edit Draft").strong().size(11.0).color(Color32::WHITE))
+                                        .fill(AppTheme::ACCENT_PRIMARY)
+                                        .rounding(Rounding::same(4.0));
+                                    if ui.add(edit_btn).clicked() {
+                                        *on_edit_draft = Some(item.clone());
+                                    }
+                                }
+
+                                if ui.button(RichText::new("↩ Reply").size(11.0)).on_hover_text("Reply to this specific message").clicked() {
+                                    *on_reply = Some(item.clone());
+                                }
+                                if ui.button(RichText::new("📝 Text").size(11.0)).on_hover_text("Plain text reply").clicked() {
+                                    *on_reply_plain = Some(item.clone());
+                                }
+                                if ui.button(RichText::new("👥 Reply All").size(11.0)).on_hover_text("Reply to all on this message").clicked() {
+                                    *on_reply_all = Some(item.clone());
+                                }
+                                if ui.button(RichText::new("➡ Forward").size(11.0)).on_hover_text("Forward this message").clicked() {
+                                    *on_forward = Some(item.clone());
+                                }
+
+                                let read_label = if item_msg.is_read { "✉ Unread" } else { "✉ Read" };
+                                if ui.button(RichText::new(read_label).size(11.0)).clicked() {
+                                    *on_toggle_read = Some((item_msg.id.clone(), !item_msg.is_read));
+                                }
+
+                                // Snooze Dropdown for this item
+                                let snooze_title = if item_msg.is_snoozed() { "💤 Snoozed" } else { "💤 Snooze" };
+                                egui::ComboBox::from_id_salt(format!("snooze_item_{}", item_msg.id))
+                                    .selected_text(RichText::new(snooze_title).size(11.0))
+                                    .show_ui(ui, |ui| {
+                                        let now = chrono::Utc::now();
+                                        if item_msg.is_snoozed() {
+                                            if ui.button(RichText::new("⏰ Unsnooze (Move to Inbox)").size(11.5).color(AppTheme::ACCENT_PRIMARY)).clicked() {
+                                                *on_snooze = Some((item_msg.id.clone(), None));
+                                                *status_toast = Some("Message unsnoozed and returned to Inbox".to_string());
+                                            }
+                                            ui.separator();
+                                        }
+
+                                        let in_3h = now.timestamp() + 3 * 3600;
+                                        if ui.button(RichText::new("⏰ Later Today (in 3 hours)").size(11.5)).clicked() {
+                                            *on_snooze = Some((item_msg.id.clone(), Some(in_3h)));
+                                            *status_toast = Some("Snoozed for 3 hours".to_string());
+                                        }
+
+                                        let tomorrow_morning = (now.date_naive() + chrono::Days::new(1))
+                                            .and_hms_opt(9, 0, 0)
+                                            .unwrap()
+                                            .and_utc()
+                                            .timestamp();
+                                        if ui.button(RichText::new("🌅 Tomorrow Morning (9:00 AM)").size(11.5)).clicked() {
+                                            *on_snooze = Some((item_msg.id.clone(), Some(tomorrow_morning)));
+                                            *status_toast = Some("Snoozed until tomorrow 9:00 AM".to_string());
+                                        }
+
+                                        let tomorrow_evening = (now.date_naive() + chrono::Days::new(1))
+                                            .and_hms_opt(18, 0, 0)
+                                            .unwrap()
+                                            .and_utc()
+                                            .timestamp();
+                                        if ui.button(RichText::new("🌆 Tomorrow Evening (6:00 PM)").size(11.5)).clicked() {
+                                            *on_snooze = Some((item_msg.id.clone(), Some(tomorrow_evening)));
+                                            *status_toast = Some("Snoozed until tomorrow 6:00 PM".to_string());
+                                        }
+
+                                        let days_until_mon = (8 - now.weekday().num_days_from_monday()) % 7;
+                                        let days_to_add = if days_until_mon == 0 { 7 } else { days_until_mon };
+                                        let next_monday = (now.date_naive() + chrono::Days::new(days_to_add as u64))
+                                            .and_hms_opt(9, 0, 0)
+                                            .unwrap()
+                                            .and_utc()
+                                            .timestamp();
+                                        if ui.button(RichText::new("📅 Next Week (Monday 9:00 AM)").size(11.5)).clicked() {
+                                            *on_snooze = Some((item_msg.id.clone(), Some(next_monday)));
+                                            *status_toast = Some("Snoozed until next Monday 9:00 AM".to_string());
+                                        }
+                                    });
+
+                                // Move dropdown for this item
+                                egui::ComboBox::from_id_salt(format!("move_item_{}", item_msg.id))
+                                    .selected_text(RichText::new("📁 Move").size(11.0))
+                                    .show_ui(ui, |ui| {
+                                        for f in folders {
+                                            if f.id != item_msg.folder_id {
+                                                if ui.selectable_label(false, &f.display_name).clicked() {
+                                                    *on_move_folder = Some((item_msg.id.clone(), f.id.clone()));
+                                                }
+                                            }
+                                        }
+                                    });
+
+                                // Export dropdown for this item
+                                egui::ComboBox::from_id_salt(format!("export_item_{}", item_msg.id))
+                                    .selected_text(RichText::new("📤 Export").size(11.0))
+                                    .show_ui(ui, |ui| {
+                                        let safe_fn = sanitize_filename_for_export(&item_msg.subject);
+                                        let item_clone = item.clone();
+
+                                        if ui.button(RichText::new("📄 Markdown (.md)").size(11.5)).clicked() {
+                                            let content = export_message_as_markdown(&item_clone);
+                                            let fname = format!("{}.md", safe_fn);
+                                            std::thread::spawn(move || {
+                                                let dialog = rfd::FileDialog::new()
+                                                    .set_file_name(&fname)
+                                                    .add_filter("Markdown Document", &["md"])
+                                                    .set_title("Export Email as Markdown");
+                                                if let Some(path) = dialog.save_file() {
+                                                    let _ = std::fs::write(path, content);
+                                                }
+                                            });
+                                            *status_toast = Some("Exporting email as Markdown...".to_string());
+                                        }
+
+                                        if ui.button(RichText::new("🌐 HTML Document (.html)").size(11.5)).clicked() {
+                                            let content = export_message_as_html(&item_clone);
+                                            let fname = format!("{}.html", safe_fn);
+                                            std::thread::spawn(move || {
+                                                let dialog = rfd::FileDialog::new()
+                                                    .set_file_name(&fname)
+                                                    .add_filter("HTML Document", &["html"])
+                                                    .set_title("Export Email as HTML");
+                                                if let Some(path) = dialog.save_file() {
+                                                    let _ = std::fs::write(path, content);
+                                                }
+                                            });
+                                            *status_toast = Some("Exporting email as HTML...".to_string());
+                                        }
+
+                                        if ui.button(RichText::new("✉ Raw EML (.eml)").size(11.5)).clicked() {
+                                            let content = export_message_as_eml(&item_clone);
+                                            let fname = format!("{}.eml", safe_fn);
+                                            std::thread::spawn(move || {
+                                                let dialog = rfd::FileDialog::new()
+                                                    .set_file_name(&fname)
+                                                    .add_filter("Email File", &["eml"])
+                                                    .set_title("Export Email as EML");
+                                                if let Some(path) = dialog.save_file() {
+                                                    let _ = std::fs::write(path, content);
+                                                }
+                                            });
+                                            *status_toast = Some("Exporting email as EML...".to_string());
+                                        }
+                                    });
+
+                                if ui.button(RichText::new("🌐 Web View").size(11.0))
+                                    .on_hover_text("Open in dedicated native WebKit webview window")
+                                    .clicked()
+                                {
+                                    let subject_title = if item_msg.subject.trim().is_empty() {
+                                        "Email Preview".to_string()
+                                    } else {
+                                        item_msg.subject.clone()
+                                    };
+                                    crate::webview::open_webview_window(subject_title, item);
+                                }
+
+                                if ui.button(RichText::new("↗ Browser").size(11.0))
+                                    .on_hover_text("Open in default system browser")
+                                    .clicked()
+                                {
+                                    let temp_dir = std::env::temp_dir();
+                                    let preview_file = temp_dir.join(format!("email_preview_{}.html", item_msg.id));
+                                    let doc = crate::webview::prepare_email_html(item);
+
+                                    if std::fs::write(&preview_file, doc).is_ok() {
+                                        ui.ctx().open_url(egui::OpenUrl::new_tab(format!("file://{}", preview_file.display())));
+                                    }
+                                }
+
+                                if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
+                                    *on_delete = Some(item_msg.id.clone());
+                                }
+                            });
+
+                            ui.add_space(8.0);
                             ui.separator();
                             ui.add_space(8.0);
 
