@@ -313,84 +313,54 @@ impl ComposeView {
 
                 ui.add_space(4.0);
                 ui.separator();
-                ui.add_space(2.0);
+                ui.add_space(4.0);
 
-                // 5. Body Text Editor & Bottom Status Bar
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.add_space(4.0);
-
-                    // Bottom Action Bar
-                    ui.horizontal(|ui| {
-                        let send_btn_label = if self.send_as_html {
-                            "🚀 Send (HTML)"
-                        } else {
-                            "🚀 Send (Plain Text)"
-                        };
-
-                        let bottom_send_btn = egui::Button::new(
-                            RichText::new(send_btn_label)
-                                .size(13.0)
-                                .strong()
-                                .color(Color32::WHITE),
-                        )
-                        .fill(AppTheme::ACCENT_PRIMARY)
-                        .rounding(Rounding::same(6.0));
-
-                        if ui.add(bottom_send_btn).clicked() {
-                            self.execute_send(accounts, signatures, cmd_tx, keyring);
-                        }
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("Discard").size(12.0)).clicked() {
-                                self.is_open = false;
-                            }
-                        });
-                    });
-
-                    if let Some(ref err) = self.error_msg {
-                        ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
-                    }
-
-                    // Attached Signature preview info
-                    if let Some(ref sig_id) = self.selected_signature_id {
-                        if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
-                                ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
-                                let plain_preview = email_html::html_to_plain_text(&sig.content_html);
-                                let truncated = if plain_preview.len() > 50 {
-                                    format!("{}...", &plain_preview[..47])
-                                } else {
-                                    plain_preview
-                                };
-                                ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
-                            });
-                        }
-                    }
-
-                    // Quoted Previous Message expandable
-                    if let Some(ref quote) = self.reply_quote {
-                        ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
-                            egui::ScrollArea::vertical().max_height(60.0).show(ui, |ui| {
-                                ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
-                            });
-                        });
-                    }
-
-                    ui.add_space(4.0);
-                    ui.separator();
-
-                    // Main Multiline Body Editor (fills remaining height between toolbar and bottom bar)
-                    ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                        let avail_size = ui.available_size();
-                        ui.add_sized(
-                            avail_size,
+                // 5. Body Text Editor & Content (Scrollable & stable height)
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.add(
                             egui::TextEdit::multiline(&mut self.body_plain)
                                 .hint_text("Type your message here...")
-                                .font(egui::TextStyle::Body),
+                                .font(egui::TextStyle::Body)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(13),
                         );
+
+                        ui.add_space(6.0);
+
+                        // Attached Signature preview info
+                        if let Some(ref sig_id) = self.selected_signature_id {
+                            if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
+                                    ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
+                                    let plain_preview = email_html::html_to_plain_text(&sig.content_html);
+                                    let truncated = if plain_preview.len() > 50 {
+                                        format!("{}...", &plain_preview[..47])
+                                    } else {
+                                        plain_preview
+                                    };
+                                    ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
+                                });
+                            }
+                        }
+
+                        // Quoted Previous Message expandable
+                        if let Some(ref quote) = self.reply_quote {
+                            ui.add_space(4.0);
+                            ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
+                                ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
+                            });
+                        }
+
+                        if let Some(ref err) = self.error_msg {
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
+                        }
+
+                        ui.add_space(8.0);
                     });
-                });
             });
 
         self.is_open = self.is_open && is_open;
