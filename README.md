@@ -84,6 +84,9 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 ---
 
 ### 📝 Composer, Drafts, Scheduled Send & Undo Send
+- **🪟 Resizable & Dynamic Height Composer**: Fully resizable modal window with an expanding multiline editor that dynamically scales and grows with your window height.
+- **🖋️ Visible Attached Signature Card & Live Preview**: Displays the currently attached signature name with a live preview of the signature text below the editor. Includes 1-click controls to change signature or detach it from the email on the fly.
+- **💬 Quoted Original Message Editor (Replying & Forwarding)**: When replying or forwarding, the previous email is displayed in a dedicated quoted message card with a `[✓ Include in reply]` checkbox, `[▲ Hide / ▼ Show Quote]` toggle, and full inline editing capability to trim or edit the quote before sending.
 - **💾 Save as Draft (`💾 Save Draft`)**: Persist in-progress emails (recipients, format, subject, body, signature) to local SQLite storage. Re-open and edit drafts directly from the reading pane (`[✏ Edit Draft]`).
 - **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.
 - **⚡ Markdown Compose Mode with Live Preview**: Side-by-side split screen for drafting emails in Markdown with real-time rendered HTML preview. Includes formatting action buttons for Bold, Italic, Headings, Lists, Blockquotes, and Code Blocks.
