@@ -99,7 +99,11 @@ impl MessageViewPane {
 
         let wrap_width = ui.available_width().max(350.0);
 
-        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
+        ScrollArea::both()
+            .auto_shrink([false; 2])
+            .hscroll(true)
+            .vscroll(true)
+            .show(ui, |ui| {
             // 2. Email Subject Title
             let subj = if msg.subject.is_empty() {
                 "(No Subject)"
@@ -274,9 +278,7 @@ impl MessageViewPane {
                                         src.clone()
                                     };
 
-                                    let available_img_width = ui.available_width().max(100.0);
                                     let img_widget = egui::Image::new(&resolved_uri)
-                                        .max_width(available_img_width)
                                         .rounding(Rounding::same(6.0))
                                         .sense(Sense::click());
 
@@ -327,9 +329,14 @@ impl MessageViewPane {
                                     ui.add_space(6.0);
                                 }
                                 HtmlBlock::CodeBlock(code) => {
-                                    let (code_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::hover());
-                                    ui.painter().rect_filled(code_rect, Rounding::same(6.0), AppTheme::BG_CARD);
-                                    ui.monospace(RichText::new(code).size(12.0).color(AppTheme::TEXT_PRIMARY));
+                                    egui::Frame::none()
+                                        .fill(AppTheme::BG_CARD)
+                                        .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                        .rounding(Rounding::same(6.0))
+                                        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                                        .show(ui, |ui| {
+                                            ui.monospace(RichText::new(code).size(12.0).color(AppTheme::TEXT_PRIMARY));
+                                        });
                                     ui.add_space(6.0);
                                 }
                                 HtmlBlock::HorizontalRule => {
