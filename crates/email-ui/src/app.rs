@@ -76,10 +76,30 @@ impl EmailApp {
         event_rx: broadcast::Receiver<SyncEvent>,
         rt_handle: tokio::runtime::Handle,
     ) -> Self {
-        let current_theme = crate::theme::ThemePreset::DarkSlate;
-        AppTheme::apply_preset(&cc.egui_ctx, current_theme);
+        let mut current_theme = crate::theme::ThemePreset::DarkSlate;
+        let mut active_custom_theme_id = None;
+
+        if let Ok(Some(custom_id)) = storage.get_setting("theme_custom_id") {
+            if !custom_id.trim().is_empty() {
+                let custom_themes = crate::theme::load_custom_themes();
+                if let Some(ct) = custom_themes.iter().find(|t| t.id == custom_id) {
+                    AppTheme::apply_custom(&cc.egui_ctx, ct);
+                    active_custom_theme_id = Some(custom_id);
+                }
+            }
+        }
+
+        if active_custom_theme_id.is_none() {
+            if let Ok(Some(preset_key)) = storage.get_setting("theme_preset") {
+                current_theme = crate::theme::ThemePreset::from_key(&preset_key);
+            }
+            AppTheme::apply_preset(&cc.egui_ctx, current_theme);
+        }
 
         let tray = AppTray::new(cmd_tx.clone(), rt_handle);
+
+        let mut settings_view = SettingsView::new();
+        settings_view.active_custom_theme_id = active_custom_theme_id;
 
         let mut app = Self {
             storage,
@@ -117,7 +137,7 @@ impl EmailApp {
             show_scheduled_modal: false,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
-            settings_view: SettingsView::new(),
+            settings_view,
             command_palette: CommandPalette::new(),
         };
 
@@ -601,6 +621,9 @@ impl EmailApp {
         match action {
             PaletteAction::SetTheme(preset) => {
                 self.current_theme = preset;
+                self.settings_view.active_custom_theme_id = None;
+                let _ = self.storage.set_setting("theme_preset", preset.to_key());
+                let _ = self.storage.set_setting("theme_custom_id", "");
                 self.status_toast = Some((format!("Switched to {} theme", preset.display_name()), std::time::Instant::now()));
             }
             PaletteAction::Compose => {
@@ -1537,6 +1560,9 @@ impl App for EmailApp {
         if let Some(action) = self.command_palette.show(ctx) {
             if let PaletteAction::SetTheme(preset) = action {
                 self.current_theme = preset;
+                self.settings_view.active_custom_theme_id = None;
+                let _ = self.storage.set_setting("theme_preset", preset.to_key());
+                let _ = self.storage.set_setting("theme_custom_id", "");
                 AppTheme::apply_preset(ctx, preset);
                 self.status_toast = Some((format!("Switched to {} theme", preset.display_name()), std::time::Instant::now()));
             } else {

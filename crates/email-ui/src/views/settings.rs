@@ -220,7 +220,7 @@ impl SettingsView {
                             self.show_templates_tab(ui, templates, storage, on_data_changed);
                         }
                         SettingsTab::Appearance => {
-                            self.show_appearance_tab(ui, ctx, current_theme);
+                            self.show_appearance_tab(ui, ctx, current_theme, storage);
                         }
                         SettingsTab::SecurityPgp => {
                             self.show_security_pgp_tab(ui, accounts, storage);
@@ -661,6 +661,7 @@ impl SettingsView {
         ui: &mut Ui,
         ctx: &egui::Context,
         current_theme: &mut crate::theme::ThemePreset,
+        storage: &Storage,
     ) {
         ui.heading(RichText::new("Theme & Visual Style").size(16.0).color(AppTheme::TEXT_PRIMARY));
         ui.add_space(4.0);
@@ -703,6 +704,8 @@ impl SettingsView {
                                 if btn.clicked() {
                                     self.active_custom_theme_id = None;
                                     *current_theme = *preset;
+                                    let _ = storage.set_setting("theme_preset", preset.to_key());
+                                    let _ = storage.set_setting("theme_custom_id", "");
                                     AppTheme::apply_preset(ctx, *preset);
                                     self.status_msg = Some((true, format!("Switched to {} theme.", preset.display_name())));
                                 }
@@ -778,6 +781,8 @@ impl SettingsView {
                                     }
                                     if btn.clicked() {
                                         self.active_custom_theme_id = Some(ct.id.clone());
+                                        let _ = storage.set_setting("theme_custom_id", &ct.id);
+                                        let _ = storage.set_setting("theme_preset", "custom");
                                         AppTheme::apply_custom(ctx, &ct);
                                         self.status_msg = Some((true, format!("Applied custom theme '{}'.", ct.name)));
                                     }

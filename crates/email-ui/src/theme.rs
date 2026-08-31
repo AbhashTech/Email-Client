@@ -64,6 +64,36 @@ impl ThemePreset {
             ThemePreset::LightClean => "Bright, crisp daylight theme for well-lit environments",
         }
     }
+
+    pub fn to_key(&self) -> &'static str {
+        match self {
+            ThemePreset::DarkSlate => "dark_slate",
+            ThemePreset::SystemAuto => "system_auto",
+            ThemePreset::CatppuccinMocha => "catppuccin_mocha",
+            ThemePreset::Nord => "nord",
+            ThemePreset::SolarizedDark => "solarized_dark",
+            ThemePreset::GruvboxDark => "gruvbox_dark",
+            ThemePreset::GruvboxLight => "gruvbox_light",
+            ThemePreset::GruvboxAuto => "gruvbox_auto",
+            ThemePreset::OledBlack => "oled_black",
+            ThemePreset::LightClean => "light_clean",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "system_auto" => ThemePreset::SystemAuto,
+            "catppuccin_mocha" => ThemePreset::CatppuccinMocha,
+            "nord" => ThemePreset::Nord,
+            "solarized_dark" => ThemePreset::SolarizedDark,
+            "gruvbox_dark" => ThemePreset::GruvboxDark,
+            "gruvbox_light" => ThemePreset::GruvboxLight,
+            "gruvbox_auto" => ThemePreset::GruvboxAuto,
+            "oled_black" => ThemePreset::OledBlack,
+            "light_clean" => ThemePreset::LightClean,
+            _ => ThemePreset::DarkSlate,
+        }
+    }
 }
 
 /// Filesystem and config path helpers for OS standard config folder

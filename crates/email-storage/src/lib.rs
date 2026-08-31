@@ -1842,6 +1842,32 @@ impl Storage {
             Err(e) => Err(EmailError::Database(e.to_string())),
         }
     }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )
+        .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM settings WHERE key = ?1")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut rows = stmt
+            .query(params![key])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        if let Some(row) = rows.next().map_err(|e| EmailError::Database(e.to_string()))? {
+            let val: String = row.get(0).map_err(|e| EmailError::Database(e.to_string()))?;
+            Ok(Some(val))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2015,6 +2041,13 @@ mod tests {
         assert!(!msgs_folder1.iter().any(|m| m.id == "msg-456"));
         let msgs_folder2 = storage.get_messages(Some(&account.id), Some(&folder2.id), 10, 0, None).unwrap();
         assert!(msgs_folder2.iter().any(|m| m.id == "msg-456"));
+
+        // 10. Test settings storage
+        assert_eq!(storage.get_setting("theme_preset").unwrap(), None);
+        storage.set_setting("theme_preset", "catppuccin_mocha").unwrap();
+        assert_eq!(storage.get_setting("theme_preset").unwrap().as_deref(), Some("catppuccin_mocha"));
+        storage.set_setting("theme_preset", "system_auto").unwrap();
+        assert_eq!(storage.get_setting("theme_preset").unwrap().as_deref(), Some("system_auto"));
     }
 
     #[test]

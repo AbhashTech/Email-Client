@@ -138,6 +138,12 @@ CREATE TABLE IF NOT EXISTS outbox (
     last_error TEXT,
     created_at INTEGER NOT NULL
 );
+
+-- Application Settings & Persistent Preferences
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 "#;
 
 pub const SCHEMA_INDEXES_AND_FTS: &str = r#"
