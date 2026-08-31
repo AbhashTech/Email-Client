@@ -97,7 +97,7 @@ impl MessageViewPane {
         );
         ui.add_space(12.0);
 
-        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
             // 2. Email Subject Title
             let subj = if msg.subject.is_empty() {
                 "(No Subject)"
