@@ -58,6 +58,12 @@ fn main() -> Result<(), eframe::Error> {
         worker.run().await;
     });
 
+    // Start background IMAP IDLE real-time push listeners for all accounts
+    let idle_storage = storage.clone();
+    let idle_keyring = keyring.clone();
+    let idle_event_tx = event_tx.clone();
+    email_sync::IdleWorker::start_for_all_accounts(idle_storage, idle_keyring, idle_event_tx);
+
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("AT-mail-rs")
