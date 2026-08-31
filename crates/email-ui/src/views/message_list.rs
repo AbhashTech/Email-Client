@@ -53,85 +53,82 @@ impl MessageListView {
         // Header Section: Search bar OR Multi-Select Action Bar
         ui.add_space(6.0);
         if !selected_ids.is_empty() {
-            // Multi-Select Action Bar
-            let bar_width = ui.available_width() - 8.0;
-            let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_width, 36.0), Sense::hover());
-            ui.painter().rect_filled(bar_rect, Rounding::same(8.0), AppTheme::BG_SELECTED);
-            ui.painter().rect_stroke(bar_rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
+            // Multi-Select Action Bar (Multi-row Responsive Wrapped)
+            egui::Frame::none()
+                .fill(AppTheme::BG_SELECTED)
+                .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+                        ui.spacing_mut().button_padding = Vec2::new(7.0, 3.5);
 
-            let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar_rect));
-            bar_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                ui.spacing_mut().button_padding = Vec2::new(7.0, 4.0);
-                ui.add_space(6.0);
-
-                let all_selected = !messages.is_empty() && messages.iter().all(|m| selected_ids.contains(&m.id));
-                let select_all_icon = if all_selected { "☑" } else { "☐" };
-                if ui.button(RichText::new(select_all_icon).size(13.0).strong()).on_hover_text("Toggle Select All").clicked() {
-                    if all_selected {
-                        selected_ids.clear();
-                    } else {
-                        for m in messages {
-                            selected_ids.insert(m.id.clone());
-                        }
-                    }
-                }
-
-                ui.label(
-                    RichText::new(format!("{} selected", selected_ids.len()))
-                        .size(12.0)
-                        .strong()
-                        .color(Color32::WHITE),
-                );
-
-                ui.separator();
-
-                // Batch Delete
-                if ui
-                    .button(RichText::new("🗑 Delete").size(11.5).color(AppTheme::ACCENT_DANGER))
-                    .on_hover_text("Delete all selected emails")
-                    .clicked()
-                {
-                    *on_batch_delete = Some(selected_ids.iter().cloned().collect());
-                }
-
-                // Batch Move Dropdown
-                if !available_folders.is_empty() {
-                    egui::ComboBox::from_id_salt("batch_move_combo")
-                        .selected_text(RichText::new("📁 Move").size(11.5))
-                        .show_ui(ui, |ui| {
-                            for folder in available_folders {
-                                if ui.button(&folder.display_name).clicked() {
-                                    *on_batch_move = Some((
-                                        selected_ids.iter().cloned().collect(),
-                                        folder.id.clone(),
-                                    ));
+                        let all_selected = !messages.is_empty() && messages.iter().all(|m| selected_ids.contains(&m.id));
+                        let select_all_icon = if all_selected { "☑" } else { "☐" };
+                        if ui.button(RichText::new(select_all_icon).size(13.0).strong()).on_hover_text("Toggle Select All").clicked() {
+                            if all_selected {
+                                selected_ids.clear();
+                            } else {
+                                for m in messages {
+                                    selected_ids.insert(m.id.clone());
                                 }
                             }
-                        });
-                }
+                        }
 
-                // Batch Mark Read/Unread
-                if ui.button(RichText::new("✉ Read").size(11.0)).on_hover_text("Mark selected as read").clicked() {
-                    *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), true));
-                }
+                        ui.label(
+                            RichText::new(format!("{} selected", selected_ids.len()))
+                                .size(12.0)
+                                .strong()
+                                .color(Color32::WHITE),
+                        );
 
-                if ui.button(RichText::new("✉ Unread").size(11.0)).on_hover_text("Mark selected as unread").clicked() {
-                    *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), false));
-                }
+                        ui.separator();
 
-                // Batch Star
-                if ui.button(RichText::new("★").size(12.0).color(AppTheme::ACCENT_STAR)).on_hover_text("Star selected").clicked() {
-                    *on_batch_toggle_flag = Some((selected_ids.iter().cloned().collect(), true));
-                }
+                        // Batch Delete
+                        if ui
+                            .button(RichText::new("🗑 Delete").size(11.5).color(AppTheme::ACCENT_DANGER))
+                            .on_hover_text("Delete all selected emails")
+                            .clicked()
+                        {
+                            *on_batch_delete = Some(selected_ids.iter().cloned().collect());
+                        }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(6.0);
-                    if ui.button(RichText::new("✖").size(11.0)).on_hover_text("Deselect all").clicked() {
-                        selected_ids.clear();
-                    }
+                        // Batch Move Dropdown
+                        if !available_folders.is_empty() {
+                            egui::ComboBox::from_id_salt("batch_move_combo")
+                                .selected_text(RichText::new("📁 Move").size(11.5))
+                                .show_ui(ui, |ui| {
+                                    for folder in available_folders {
+                                        if ui.button(&folder.display_name).clicked() {
+                                            *on_batch_move = Some((
+                                                selected_ids.iter().cloned().collect(),
+                                                folder.id.clone(),
+                                            ));
+                                        }
+                                    }
+                                });
+                        }
+
+                        // Batch Mark Read/Unread
+                        if ui.button(RichText::new("✉ Read").size(11.0)).on_hover_text("Mark selected as read").clicked() {
+                            *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), true));
+                        }
+
+                        if ui.button(RichText::new("✉ Unread").size(11.0)).on_hover_text("Mark selected as unread").clicked() {
+                            *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), false));
+                        }
+
+                        // Batch Star
+                        if ui.button(RichText::new("★").size(12.0).color(AppTheme::ACCENT_STAR)).on_hover_text("Star selected").clicked() {
+                            *on_batch_toggle_flag = Some((selected_ids.iter().cloned().collect(), true));
+                        }
+
+                        if ui.button(RichText::new("× Clear").size(11.0)).on_hover_text("Deselect all").clicked() {
+                            selected_ids.clear();
+                        }
+                    });
                 });
-            });
         } else {
             // Standard Search & Filter Header Bar
             ui.horizontal(|ui| {

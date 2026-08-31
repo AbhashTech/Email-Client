@@ -45,11 +45,11 @@ impl MessageViewPane {
         let latest_detail = &thread_messages[thread_messages.len() - 1];
         let msg = &latest_detail.header;
 
-        // 1. Action Toolbar
+        // 1. Action Toolbar (Multi-row Responsive Wrapped)
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-            ui.spacing_mut().button_padding = Vec2::new(8.0, 4.5);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 5.0);
+            ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
 
             if msg.is_draft {
                 let edit_btn = egui::Button::new(RichText::new("✏ Edit Draft").strong().size(12.0).color(Color32::WHITE))
@@ -436,8 +436,8 @@ impl MessageViewPane {
                             ui.add_space(6.0);
 
                             // Per-message action toolbar for this specific email in the thread
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(5.0, 4.0);
                                 ui.spacing_mut().button_padding = Vec2::new(6.0, 3.0);
 
                                 if item_msg.is_draft {
