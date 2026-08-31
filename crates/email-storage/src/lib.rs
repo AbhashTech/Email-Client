@@ -102,6 +102,7 @@ impl Storage {
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         let _ = conn.pragma_update(None, "foreign_keys", "ON");
+        let _ = conn.pragma_update(None, "busy_timeout", "5000");
 
         // 1. Create base tables
         conn.execute_batch(schema::SCHEMA_TABLES)

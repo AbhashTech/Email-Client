@@ -54,6 +54,9 @@ pub struct EmailApp {
     is_maximized: bool,
     last_scheduled_check: std::time::Instant,
     last_outbox_check: std::time::Instant,
+    last_snoozed_check: std::time::Instant,
+    scheduled_count: usize,
+    outbox_count: usize,
     show_scheduled_modal: bool,
 
     // Sub-views
@@ -108,6 +111,9 @@ impl EmailApp {
             is_maximized: false,
             last_scheduled_check: std::time::Instant::now(),
             last_outbox_check: std::time::Instant::now(),
+            last_snoozed_check: std::time::Instant::now(),
+            scheduled_count: 0,
+            outbox_count: 0,
             show_scheduled_modal: false,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
@@ -149,6 +155,9 @@ impl EmailApp {
         if let Ok(signatures) = self.storage.get_signatures(None) {
             self.signatures = signatures;
         }
+
+        self.scheduled_count = self.storage.list_all_scheduled(None).unwrap_or_default().len();
+        self.outbox_count = self.storage.get_all_outbox_items(None).unwrap_or_default().len();
 
         // Update unread count for system tray
         let total_unread: u32 = self
@@ -349,6 +358,10 @@ impl EmailApp {
         }
         self.last_outbox_check = std::time::Instant::now();
 
+        if let Ok(all_outbox) = self.storage.get_all_outbox_items(None) {
+            self.outbox_count = all_outbox.len();
+        }
+
         if let Ok(due_items) = self.storage.get_due_outbox_items() {
             for item in due_items {
                 let acc_opt = self.accounts.iter().find(|a| a.id == item.account_id).cloned();
@@ -359,6 +372,7 @@ impl EmailApp {
                             password: pwd,
                         });
                         let _ = self.storage.delete_outbox_item(&item.id);
+                        self.outbox_count = self.outbox_count.saturating_sub(1);
                         self.status_toast = Some((
                             format!("✓ Outbox Auto-Retry: Transmitting '{}'", item.draft.subject),
                             std::time::Instant::now(),
@@ -370,6 +384,11 @@ impl EmailApp {
     }
 
     pub fn check_snoozed_queue(&mut self) {
+        if self.last_snoozed_check.elapsed() < std::time::Duration::from_secs(3) {
+            return;
+        }
+        self.last_snoozed_check = std::time::Instant::now();
+
         let now_ts = chrono::Utc::now().timestamp();
         if let Ok(due_snoozed) = self.storage.get_due_snoozed_messages(now_ts) {
             let count = due_snoozed.len();
@@ -405,10 +424,14 @@ impl EmailApp {
     }
 
     pub fn check_scheduled_queue(&mut self) {
-        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(2) {
+        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(3) {
             return;
         }
         self.last_scheduled_check = std::time::Instant::now();
+
+        if let Ok(all_sched) = self.storage.list_all_scheduled(None) {
+            self.scheduled_count = all_sched.len();
+        }
 
         let now_ts = chrono::Utc::now().timestamp();
         if let Ok(due_list) = self.storage.get_due_scheduled_emails(now_ts) {
@@ -421,6 +444,7 @@ impl EmailApp {
                             password: pwd,
                         });
                         let _ = self.storage.delete_scheduled_email(&item.id);
+                        self.scheduled_count = self.scheduled_count.saturating_sub(1);
                         self.status_toast = Some((
                             format!("✓ Transmitting scheduled email: '{}'", item.draft.subject),
                             std::time::Instant::now(),
@@ -798,17 +822,15 @@ impl App for EmailApp {
                     let _ = self.cmd_tx.send(SyncCommand::SyncAll);
                 }
 
-                let scheduled_count = self.storage.list_all_scheduled(None).unwrap_or_default().len();
-                if scheduled_count > 0 {
-                    let sched_text = format!("⏰ {} Scheduled", scheduled_count);
+                if self.scheduled_count > 0 {
+                    let sched_text = format!("⏰ {} Scheduled", self.scheduled_count);
                     if ui.button(RichText::new(sched_text).size(12.5).color(AppTheme::ACCENT_PRIMARY)).on_hover_text("View scheduled outbox queue").clicked() {
                         self.show_scheduled_modal = true;
                     }
                 }
 
-                let outbox_count = self.storage.get_all_outbox_items(None).unwrap_or_default().len();
-                if outbox_count > 0 {
-                    let outbox_text = format!("📤 {} Outbox", outbox_count);
+                if self.outbox_count > 0 {
+                    let outbox_text = format!("📤 {} Outbox", self.outbox_count);
                     if ui.button(RichText::new(outbox_text).size(12.5).color(AppTheme::ACCENT_WARNING)).on_hover_text("View outbox auto-retry queue").clicked() {
                         self.selected_folder = FolderSelection::UnifiedOutbox;
                         self.reload_messages();
