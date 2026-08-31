@@ -113,7 +113,8 @@ pub fn run_standalone_webview(file_path: &std::path::Path, title: &str) {
     {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("Failed to create webview window: {}", e);
+            eprintln!("Failed to create webview window: {}. Opening in default browser instead.", e);
+            open_in_browser(file_path);
             return;
         }
     };
@@ -126,7 +127,8 @@ pub fn run_standalone_webview(file_path: &std::path::Path, title: &str) {
     {
         Ok(wv) => wv,
         Err(e) => {
-            eprintln!("Failed to build webview: {}", e);
+            eprintln!("Failed to build webview: {}. Opening in default browser instead.", e);
+            open_in_browser(file_path);
             return;
         }
     };
@@ -142,4 +144,19 @@ pub fn run_standalone_webview(file_path: &std::path::Path, title: &str) {
             *control_flow = ControlFlow::Exit;
         }
     });
+}
+
+fn open_in_browser(path: &std::path::Path) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(path).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).spawn();
+    }
 }

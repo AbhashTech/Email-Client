@@ -393,27 +393,27 @@ impl MessageViewPane {
                                                                 "image.png".to_string()
                                                             };
 
-                                                            let dialog = rfd::FileDialog::new()
-                                                                .set_file_name(&default_name)
-                                                                .set_title("Save Image As...");
+                                                            let save_uri = img_uri.clone();
+                                                            std::thread::spawn(move || {
+                                                                let dialog = rfd::FileDialog::new()
+                                                                    .set_file_name(&default_name)
+                                                                    .set_title("Save Image As...");
 
-                                                            if let Some(dest_path) = dialog.save_file() {
-                                                                if img_uri.starts_with("file://") {
-                                                                    let local_path = img_uri.trim_start_matches("file://");
-                                                                    if std::fs::copy(local_path, &dest_path).is_ok() {
-                                                                        *status_toast = Some(format!("Saved image to {}", dest_path.display()));
-                                                                    }
-                                                                } else if img_uri.starts_with("data:") {
-                                                                    if let Some(comma_pos) = img_uri.find(',') {
-                                                                        let b64_data = &img_uri[comma_pos + 1..];
-                                                                        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
-                                                                            if std::fs::write(&dest_path, decoded).is_ok() {
-                                                                                *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                                if let Some(dest_path) = dialog.save_file() {
+                                                                    if save_uri.starts_with("file://") {
+                                                                        let local_path = save_uri.trim_start_matches("file://");
+                                                                        let _ = std::fs::copy(local_path, &dest_path);
+                                                                    } else if save_uri.starts_with("data:") {
+                                                                        if let Some(comma_pos) = save_uri.find(',') {
+                                                                            let b64_data = &save_uri[comma_pos + 1..];
+                                                                            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
+                                                                                let _ = std::fs::write(&dest_path, decoded);
                                                                             }
                                                                         }
                                                                     }
                                                                 }
-                                                            }
+                                                            });
+                                                            *status_toast = Some("Opening file picker...".to_string());
                                                             ui.close_menu();
                                                         }
                                                     });
@@ -499,17 +499,19 @@ impl MessageViewPane {
 
                         if resp.clicked() {
                             if let Some(ref cache_path) = att.local_cache_path {
-                                let src_path = std::path::Path::new(cache_path);
+                                let src_path = std::path::PathBuf::from(cache_path);
+                                let filename = att.filename.clone();
                                 if src_path.exists() {
-                                    let dialog = rfd::FileDialog::new()
-                                        .set_file_name(&att.filename)
-                                        .set_title("Save Attachment As...");
+                                    std::thread::spawn(move || {
+                                        let dialog = rfd::FileDialog::new()
+                                            .set_file_name(&filename)
+                                            .set_title("Save Attachment As...");
 
-                                    if let Some(dest_path) = dialog.save_file() {
-                                        if std::fs::copy(src_path, &dest_path).is_ok() {
-                                            *status_toast = Some(format!("Saved attachment to {}", dest_path.display()));
+                                        if let Some(dest_path) = dialog.save_file() {
+                                            let _ = std::fs::copy(&src_path, &dest_path);
                                         }
-                                    }
+                                    });
+                                    *status_toast = Some(format!("Saving attachment: {}", att.filename));
                                 }
                             }
                         }
