@@ -1,6 +1,7 @@
 use crate::theme::AppTheme;
 use egui::{Color32, FontId, Rect, RichText, Rounding, ScrollArea, Sense, Stroke, Ui, Vec2};
-use email_core::models::MessageHeader;
+use email_core::models::{Folder, MessageHeader};
+use std::collections::HashSet;
 
 pub struct MessageListView;
 
@@ -11,35 +12,157 @@ impl MessageListView {
         ui: &mut Ui,
         messages: &[MessageHeader],
         selected_message_id: &mut Option<String>,
+        selected_ids: &mut HashSet<String>,
+        last_clicked_idx: &mut Option<usize>,
         search_query: &mut String,
+        available_folders: &[Folder],
         on_toggle_read: &mut Option<(String, bool)>,
         on_toggle_flag: &mut Option<(String, bool)>,
+        on_batch_delete: &mut Option<Vec<String>>,
+        on_batch_move: &mut Option<(Vec<String>, String)>,
+        on_batch_toggle_read: &mut Option<(Vec<String>, bool)>,
+        on_batch_toggle_flag: &mut Option<(Vec<String>, bool)>,
     ) {
-        // Search & Filter Header Bar
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let search_width = ui.available_width() - 8.0;
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(search_width, 32.0), Sense::hover());
-            ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::BG_CARD);
-            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+        // Drag-and-drop preview cursor following mouse
+        if let Some(payload) = egui::DragAndDrop::payload::<Vec<String>>(ui.ctx()) {
+            if let Some(pointer_pos) = ui.ctx().pointer_latest_pos() {
+                egui::Area::new(egui::Id::new("dnd_message_drag_preview"))
+                    .order(egui::Order::Tooltip)
+                    .fixed_pos(pointer_pos + Vec2::new(14.0, 14.0))
+                    .interactable(false)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style())
+                            .fill(AppTheme::BG_CARD)
+                            .stroke(Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY))
+                            .rounding(Rounding::same(8.0))
+                            .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                            .show(ui, |ui| {
+                                let count = payload.len();
+                                let msg = if count == 1 {
+                                    "📁 Moving 1 email...".to_string()
+                                } else {
+                                    format!("📁 Moving {} emails...", count)
+                                };
+                                ui.label(RichText::new(msg).strong().color(Color32::WHITE));
+                            });
+                    });
+            }
+        }
 
-            let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            search_ui.horizontal(|ui| {
+        // Header Section: Search bar OR Multi-Select Action Bar
+        ui.add_space(6.0);
+        if !selected_ids.is_empty() {
+            // Multi-Select Action Bar
+            let bar_width = ui.available_width() - 8.0;
+            let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_width, 36.0), Sense::hover());
+            ui.painter().rect_filled(bar_rect, Rounding::same(8.0), AppTheme::BG_SELECTED);
+            ui.painter().rect_stroke(bar_rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
+
+            let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar_rect));
+            bar_ui.horizontal_centered(|ui| {
                 ui.add_space(8.0);
-                ui.label(RichText::new("🔍").size(12.0).color(AppTheme::TEXT_MUTED));
-                let _response = ui.add(
-                    egui::TextEdit::singleline(search_query)
-                        .hint_text("Search emails (subject, sender, content)...")
-                        .frame(false)
-                        .desired_width(search_width - 50.0),
-                );
-                if !search_query.is_empty() {
-                    if ui.small_button("✖").clicked() {
-                        search_query.clear();
+
+                let all_selected = !messages.is_empty() && messages.iter().all(|m| selected_ids.contains(&m.id));
+                let select_all_icon = if all_selected { "☑" } else { "☐" };
+                if ui.button(RichText::new(select_all_icon).size(13.0).strong()).on_hover_text("Toggle Select All").clicked() {
+                    if all_selected {
+                        selected_ids.clear();
+                    } else {
+                        for m in messages {
+                            selected_ids.insert(m.id.clone());
+                        }
                     }
                 }
+
+                ui.label(
+                    RichText::new(format!("{} selected", selected_ids.len()))
+                        .size(12.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+
+                ui.separator();
+
+                // Batch Delete
+                if ui
+                    .button(RichText::new("🗑 Delete").size(11.5).color(AppTheme::ACCENT_DANGER))
+                    .on_hover_text("Delete all selected emails")
+                    .clicked()
+                {
+                    *on_batch_delete = Some(selected_ids.iter().cloned().collect());
+                }
+
+                // Batch Move Dropdown
+                if !available_folders.is_empty() {
+                    egui::ComboBox::from_id_salt("batch_move_combo")
+                        .selected_text(RichText::new("📁 Move").size(11.5))
+                        .show_ui(ui, |ui| {
+                            for folder in available_folders {
+                                if ui.button(&folder.display_name).clicked() {
+                                    *on_batch_move = Some((
+                                        selected_ids.iter().cloned().collect(),
+                                        folder.id.clone(),
+                                    ));
+                                }
+                            }
+                        });
+                }
+
+                // Batch Mark Read/Unread
+                if ui.button(RichText::new("✉ Read").size(11.0)).on_hover_text("Mark selected as read").clicked() {
+                    *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), true));
+                }
+
+                if ui.button(RichText::new("✉ Unread").size(11.0)).on_hover_text("Mark selected as unread").clicked() {
+                    *on_batch_toggle_read = Some((selected_ids.iter().cloned().collect(), false));
+                }
+
+                // Batch Star
+                if ui.button(RichText::new("★").size(12.0).color(AppTheme::ACCENT_STAR)).on_hover_text("Star selected").clicked() {
+                    *on_batch_toggle_flag = Some((selected_ids.iter().cloned().collect(), true));
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(6.0);
+                    if ui.button(RichText::new("✖").size(11.0)).on_hover_text("Deselect all").clicked() {
+                        selected_ids.clear();
+                    }
+                });
             });
-        });
+        } else {
+            // Standard Search & Filter Header Bar
+            ui.horizontal(|ui| {
+                let search_width = ui.available_width() - 8.0;
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(search_width, 32.0), Sense::hover());
+                ui.painter().rect_filled(rect, Rounding::same(8.0), AppTheme::BG_CARD);
+                ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE));
+
+                let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                search_ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("🔍").size(12.0).color(AppTheme::TEXT_MUTED));
+                    let _response = ui.add(
+                        egui::TextEdit::singleline(search_query)
+                            .hint_text("Search emails (subject, sender, content)...")
+                            .frame(false)
+                            .desired_width(search_width - 70.0),
+                    );
+                    if !search_query.is_empty() {
+                        if ui.small_button("✖").clicked() {
+                            search_query.clear();
+                        }
+                    }
+
+                    if !messages.is_empty() {
+                        if ui.small_button("☑").on_hover_text("Select all").clicked() {
+                            for m in messages {
+                                selected_ids.insert(m.id.clone());
+                            }
+                        }
+                    }
+                });
+            });
+        }
 
         ui.add_space(6.0);
         ui.painter().hline(
@@ -70,19 +193,64 @@ impl MessageListView {
             .show_rows(ui, Self::ROW_HEIGHT, messages.len(), |ui, row_range| {
                 for idx in row_range {
                     let msg = &messages[idx];
-                    let is_selected = selected_message_id.as_deref() == Some(&msg.id);
+                    let is_active_view = selected_message_id.as_deref() == Some(&msg.id);
+                    let is_in_selection = selected_ids.contains(&msg.id);
 
                     let (rect, response) = ui.allocate_exact_size(
                         Vec2::new(ui.available_width(), Self::ROW_HEIGHT),
-                        Sense::click(),
+                        Sense::click_and_drag(),
                     );
 
+                    // Drag-and-drop source
+                    if response.drag_started() {
+                        let payload: Vec<String> = if is_in_selection && selected_ids.len() > 1 {
+                            selected_ids.iter().cloned().collect()
+                        } else {
+                            selected_ids.clear();
+                            selected_ids.insert(msg.id.clone());
+                            *selected_message_id = Some(msg.id.clone());
+                            vec![msg.id.clone()]
+                        };
+                        egui::DragAndDrop::set_payload(ui.ctx(), payload);
+                    }
+
+                    // Row click handling (supporting Ctrl/Cmd toggle and Shift range selection)
                     if response.clicked() {
-                        *selected_message_id = Some(msg.id.clone());
+                        let is_ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                        let is_shift = ui.input(|i| i.modifiers.shift);
+
+                        if is_ctrl {
+                            if selected_ids.contains(&msg.id) {
+                                selected_ids.remove(&msg.id);
+                            } else {
+                                selected_ids.insert(msg.id.clone());
+                            }
+                            *selected_message_id = Some(msg.id.clone());
+                            *last_clicked_idx = Some(idx);
+                        } else if is_shift {
+                            if let Some(prev) = *last_clicked_idx {
+                                let start = prev.min(idx);
+                                let end = prev.max(idx);
+                                for i in start..=end {
+                                    if let Some(m) = messages.get(i) {
+                                        selected_ids.insert(m.id.clone());
+                                    }
+                                }
+                            } else {
+                                selected_ids.insert(msg.id.clone());
+                            }
+                            *selected_message_id = Some(msg.id.clone());
+                            *last_clicked_idx = Some(idx);
+                        } else {
+                            selected_ids.clear();
+                            selected_ids.insert(msg.id.clone());
+                            *selected_message_id = Some(msg.id.clone());
+                            *last_clicked_idx = Some(idx);
+                        }
                     }
 
                     // Background highlight
-                    let bg_color = if is_selected {
+                    let bg_color = if is_in_selection || is_active_view {
                         AppTheme::BG_SELECTED
                     } else if response.hovered() {
                         AppTheme::BG_HOVER
@@ -94,7 +262,7 @@ impl MessageListView {
 
                     ui.painter().rect_filled(rect, Rounding::same(6.0), bg_color);
 
-                    if is_selected {
+                    if is_active_view || is_in_selection {
                         // Left active indicator
                         let indicator = Rect::from_min_size(rect.min, Vec2::new(3.5, Self::ROW_HEIGHT));
                         ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::ACCENT_PRIMARY);
@@ -105,8 +273,36 @@ impl MessageListView {
                     child_ui.horizontal(|ui| {
                         ui.add_space(8.0);
 
-                        // 1. Unread Blue Dot
-                        let (dot_rect, dot_resp) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), Sense::click());
+                        // 1. Selection Checkbox
+                        let (cb_rect, cb_resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
+                        if cb_resp.clicked() {
+                            if selected_ids.contains(&msg.id) {
+                                selected_ids.remove(&msg.id);
+                            } else {
+                                selected_ids.insert(msg.id.clone());
+                            }
+                            *selected_message_id = Some(msg.id.clone());
+                            *last_clicked_idx = Some(idx);
+                        }
+
+                        let cb_border = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { AppTheme::BORDER_SUBTLE };
+                        let cb_bg = if is_in_selection { AppTheme::ACCENT_PRIMARY } else { Color32::TRANSPARENT };
+                        ui.painter().rect_filled(cb_rect, Rounding::same(4.0), cb_bg);
+                        ui.painter().rect_stroke(cb_rect, Rounding::same(4.0), Stroke::new(1.0_f32, cb_border));
+                        if is_in_selection {
+                            ui.painter().text(
+                                cb_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "✓",
+                                FontId::proportional(11.0),
+                                Color32::WHITE,
+                            );
+                        }
+
+                        ui.add_space(2.0);
+
+                        // 2. Unread Blue Dot
+                        let (dot_rect, dot_resp) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::click());
                         if dot_resp.clicked() {
                             *on_toggle_read = Some((msg.id.clone(), !msg.is_read));
                         }
@@ -115,10 +311,10 @@ impl MessageListView {
                         } else {
                             Color32::TRANSPARENT
                         };
-                        ui.painter().circle_filled(dot_rect.center(), 4.0, dot_color);
+                        ui.painter().circle_filled(dot_rect.center(), 3.5, dot_color);
 
-                        // 2. Avatar Circle with Initials
-                        let avatar_size = 32.0;
+                        // 3. Avatar Circle with Initials
+                        let avatar_size = 30.0;
                         let (avatar_rect, _) = ui.allocate_exact_size(Vec2::new(avatar_size, avatar_size), Sense::hover());
                         let avatar_bg = AppTheme::avatar_color(msg.sender_display());
                         ui.painter().circle_filled(avatar_rect.center(), avatar_size / 2.0, avatar_bg);
@@ -128,13 +324,13 @@ impl MessageListView {
                             avatar_rect.center(),
                             egui::Align2::CENTER_CENTER,
                             initials,
-                            FontId::proportional(12.0),
+                            FontId::proportional(11.5),
                             Color32::WHITE,
                         );
 
                         ui.add_space(6.0);
 
-                        // 3. Message Content Columns
+                        // 4. Message Content Columns
                         ui.vertical(|ui| {
                             ui.add_space(6.0);
 
@@ -184,7 +380,7 @@ impl MessageListView {
                                 msg.subject.clone()
                             };
 
-                            let subj_color = if is_selected {
+                            let subj_color = if is_active_view || is_in_selection {
                                 Color32::WHITE
                             } else if !msg.is_read {
                                 AppTheme::TEXT_PRIMARY
@@ -223,7 +419,6 @@ impl MessageListView {
                         rect.bottom(),
                         Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
                     );
-
                 }
             });
     }

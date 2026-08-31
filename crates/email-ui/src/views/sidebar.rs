@@ -21,6 +21,7 @@ impl SidebarView {
         on_add_account: &mut bool,
         on_open_settings: &mut bool,
         on_sync_all: &mut bool,
+        on_drop_move: &mut Option<(Vec<String>, String, String)>,
     ) {
         ui.vertical(|ui| {
             // App Brand Header
@@ -77,6 +78,7 @@ impl SidebarView {
                         0,
                         matches!(selected, FolderSelection::UnifiedFlagged),
                         || *selected = FolderSelection::UnifiedFlagged,
+                        None::<fn(Vec<String>)>,
                     );
 
                     let total_unread_count: u32 = folders_by_account
@@ -92,6 +94,7 @@ impl SidebarView {
                         total_unread_count,
                         matches!(selected, FolderSelection::UnifiedUnread),
                         || *selected = FolderSelection::UnifiedUnread,
+                        None::<fn(Vec<String>)>,
                     );
 
                     ui.add_space(14.0);
@@ -154,6 +157,8 @@ impl SidebarView {
                                                 "📁"
                                             };
 
+                                            let acc_id = account.id.clone();
+                                            let fold_id = folder.id.clone();
                                             Self::render_folder_item(
                                                 ui,
                                                 icon,
@@ -162,10 +167,13 @@ impl SidebarView {
                                                 is_sel,
                                                 || {
                                                     *selected = FolderSelection::Folder {
-                                                        account_id: account.id.clone(),
-                                                        folder_id: folder.id.clone(),
+                                                        account_id: acc_id.clone(),
+                                                        folder_id: fold_id.clone(),
                                                     }
                                                 },
+                                                Some(|msg_ids| {
+                                                    *on_drop_move = Some((msg_ids, acc_id.clone(), fold_id.clone()));
+                                                }),
                                             );
                                         }
                                     } else {
@@ -212,6 +220,7 @@ impl SidebarView {
         unread: u32,
         is_selected: bool,
         mut on_click: impl FnMut(),
+        mut on_drop: Option<impl FnMut(Vec<String>)>,
     ) {
         let height = 34.0;
         let width = ui.available_width().max(160.0);
@@ -224,8 +233,17 @@ impl SidebarView {
             on_click();
         }
 
+        let is_dnd_hovered = response.dnd_hover_payload::<Vec<String>>().is_some();
+        if let Some(payload) = response.dnd_release_payload::<Vec<String>>() {
+            if let Some(ref mut drop_fn) = on_drop {
+                drop_fn((*payload).clone());
+            }
+        }
+
         // Draw background with clean inner margins
-        let bg = if is_selected {
+        let bg = if is_dnd_hovered {
+            Color32::from_rgb(35, 65, 105)
+        } else if is_selected {
             AppTheme::BG_SELECTED
         } else if response.hovered() {
             AppTheme::BG_HOVER
@@ -235,7 +253,9 @@ impl SidebarView {
 
         ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
 
-        if is_selected {
+        if is_dnd_hovered {
+            ui.painter().rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.5_f32, AppTheme::ACCENT_PRIMARY));
+        } else if is_selected {
             // Accent bar on the left with vertical margin
             let indicator = Rect::from_min_size(
                 rect.min + Vec2::new(3.0, 6.0),
@@ -251,7 +271,9 @@ impl SidebarView {
             ui.label(RichText::new(icon).size(14.0));
             ui.add_space(6.0);
 
-            let text_color = if is_selected {
+            let text_color = if is_dnd_hovered {
+                Color32::from_rgb(180, 220, 255)
+            } else if is_selected {
                 Color32::WHITE
             } else if unread > 0 {
                 AppTheme::TEXT_PRIMARY
@@ -259,7 +281,9 @@ impl SidebarView {
                 AppTheme::TEXT_SECONDARY
             };
 
-            let text_style = if unread > 0 {
+            let text_style = if is_dnd_hovered {
+                RichText::new(format!("{} (Drop)", name)).size(13.0).strong().color(text_color)
+            } else if unread > 0 {
                 RichText::new(name).size(13.0).strong().color(text_color)
             } else {
                 RichText::new(name).size(13.0).color(text_color)
@@ -268,7 +292,7 @@ impl SidebarView {
             ui.label(text_style);
 
             // Badge Pill for unread messages with generous right padding
-            if unread > 0 {
+            if unread > 0 && !is_dnd_hovered {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.0);
                     let badge_text = if unread > 999 {

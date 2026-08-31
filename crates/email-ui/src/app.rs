@@ -8,7 +8,7 @@ use email_core::models::{Account, Folder, MessageDetail, MessageHeader, Signatur
 use email_keychain::CredentialStore;
 use email_storage::Storage;
 use log::error;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 
@@ -30,6 +30,8 @@ pub struct EmailApp {
     // UI Navigation State
     selected_folder: FolderSelection,
     selected_message_id: Option<String>,
+    selected_message_ids: HashSet<String>,
+    last_clicked_idx: Option<usize>,
     search_query: String,
     status_text: String,
     status_toast: Option<(String, std::time::Instant)>,
@@ -72,6 +74,8 @@ impl EmailApp {
             signatures: Vec::new(),
             selected_folder: FolderSelection::UnifiedUnread,
             selected_message_id: None,
+            selected_message_ids: HashSet::new(),
+            last_clicked_idx: None,
             search_query: String::new(),
             status_text: "Ready".to_string(),
             status_toast: None,
@@ -345,6 +349,7 @@ impl App for EmailApp {
                     let mut on_add_account = false;
                     let mut on_open_settings = false;
                     let mut on_sync_all = false;
+                    let mut on_drop_move = None;
 
                     SidebarView::show(
                         ui,
@@ -354,6 +359,7 @@ impl App for EmailApp {
                         &mut on_add_account,
                         &mut on_open_settings,
                         &mut on_sync_all,
+                        &mut on_drop_move,
                     );
 
                     if on_add_account {
@@ -368,8 +374,35 @@ impl App for EmailApp {
 
                     if prev_folder != self.selected_folder {
                         self.selected_message_id = None;
+                        self.selected_message_ids.clear();
+                        self.last_clicked_idx = None;
                         self.selected_message_detail = None;
                         self.reload_messages();
+                    }
+
+                    if let Some((ids_to_move, account_id, target_folder_id)) = on_drop_move {
+                        let mut moved_count = 0;
+                        for mid in &ids_to_move {
+                            if let Ok(Some(detail)) = self.storage.get_message_detail(mid) {
+                                let _ = self.storage.move_message_to_folder(mid, &target_folder_id);
+                                let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
+                                    account_id: account_id.clone(),
+                                    source_folder_id: detail.header.folder_id,
+                                    target_folder_id: target_folder_id.clone(),
+                                    uid: detail.header.uid,
+                                    message_id: mid.clone(),
+                                });
+                                moved_count += 1;
+                            }
+                        }
+                        self.selected_message_ids.clear();
+                        self.selected_message_id = None;
+                        self.selected_message_detail = None;
+                        self.reload_data();
+                        let target_folder_name = self.folders_by_account.values().flatten().find(|f| f.id == target_folder_id).map(|f| f.display_name.as_str()).unwrap_or("folder");
+                        let toast = format!("Moved {} message(s) to {}", moved_count, target_folder_name);
+                        self.status_text = toast.clone();
+                        self.status_toast = Some((toast, std::time::Instant::now()));
                     }
                 });
         }
@@ -379,6 +412,12 @@ impl App for EmailApp {
         let prev_search = self.search_query.clone();
         let mut on_toggle_read = None;
         let mut on_toggle_flag = None;
+        let mut on_batch_delete = None;
+        let mut on_batch_move = None;
+        let mut on_batch_toggle_read = None;
+        let mut on_batch_toggle_flag = None;
+
+        let available_folders: Vec<Folder> = self.folders_by_account.values().flatten().cloned().collect();
 
         if self.show_message_list {
             egui::SidePanel::left("message_list_panel")
@@ -391,15 +430,99 @@ impl App for EmailApp {
                         ui,
                         &self.messages,
                         &mut self.selected_message_id,
+                        &mut self.selected_message_ids,
+                        &mut self.last_clicked_idx,
                         &mut self.search_query,
+                        &available_folders,
                         &mut on_toggle_read,
                         &mut on_toggle_flag,
+                        &mut on_batch_delete,
+                        &mut on_batch_move,
+                        &mut on_batch_toggle_read,
+                        &mut on_batch_toggle_flag,
                     );
                 });
         }
 
         if prev_search != self.search_query {
             self.reload_messages();
+        }
+
+        if let Some(ids_to_delete) = on_batch_delete {
+            for mid in &ids_to_delete {
+                if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
+                    let _ = self.storage.delete_message(mid);
+                    let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
+                        account_id: m.account_id.clone(),
+                        folder_id: m.folder_id.clone(),
+                        uid: m.uid,
+                    });
+                }
+            }
+            self.selected_message_ids.clear();
+            self.selected_message_id = None;
+            self.selected_message_detail = None;
+            self.reload_data();
+            let toast = format!("Deleted {} email(s)", ids_to_delete.len());
+            self.status_text = toast.clone();
+            self.status_toast = Some((toast, std::time::Instant::now()));
+        }
+
+        if let Some((ids_to_move, target_folder_id)) = on_batch_move {
+            let mut moved_count = 0;
+            for mid in &ids_to_move {
+                if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
+                    let _ = self.storage.move_message_to_folder(mid, &target_folder_id);
+                    let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
+                        account_id: m.account_id.clone(),
+                        source_folder_id: m.folder_id.clone(),
+                        target_folder_id: target_folder_id.clone(),
+                        uid: m.uid,
+                        message_id: mid.clone(),
+                    });
+                    moved_count += 1;
+                }
+            }
+            self.selected_message_ids.clear();
+            self.selected_message_id = None;
+            self.selected_message_detail = None;
+            self.reload_data();
+            let target_folder_name = self.folders_by_account.values().flatten().find(|f| f.id == target_folder_id).map(|f| f.display_name.as_str()).unwrap_or("folder");
+            let toast = format!("Moved {} email(s) to {}", moved_count, target_folder_name);
+            self.status_text = toast.clone();
+            self.status_toast = Some((toast, std::time::Instant::now()));
+        }
+
+        if let Some((ids, is_read)) = on_batch_toggle_read {
+            for mid in &ids {
+                let _ = self.storage.set_message_read(mid, is_read);
+                if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                    m.is_read = is_read;
+                    let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                        account_id: m.account_id.clone(),
+                        folder_id: m.folder_id.clone(),
+                        uid: m.uid,
+                        is_read,
+                    });
+                }
+            }
+            self.reload_data();
+        }
+
+        if let Some((ids, is_flag)) = on_batch_toggle_flag {
+            for mid in &ids {
+                let _ = self.storage.set_message_flagged(mid, is_flag);
+                if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                    m.is_flagged = is_flag;
+                    let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
+                        account_id: m.account_id.clone(),
+                        folder_id: m.folder_id.clone(),
+                        uid: m.uid,
+                        is_flagged: is_flag,
+                    });
+                }
+            }
+            self.reload_data();
         }
 
         if let Some((msg_id, is_read)) = on_toggle_read {
