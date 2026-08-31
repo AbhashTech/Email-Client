@@ -33,6 +33,7 @@ pub struct EmailApp {
     selected_message_ids: HashSet<String>,
     last_clicked_idx: Option<usize>,
     search_query: String,
+    focus_search_requested: bool,
     status_text: String,
     status_toast: Option<(String, std::time::Instant)>,
     is_syncing: bool,
@@ -43,6 +44,7 @@ pub struct EmailApp {
     account_setup_view: AccountSetupView,
     compose_view: ComposeView,
     settings_view: SettingsView,
+    command_palette: CommandPalette,
 }
 
 
@@ -77,6 +79,7 @@ impl EmailApp {
             selected_message_ids: HashSet::new(),
             last_clicked_idx: None,
             search_query: String::new(),
+            focus_search_requested: false,
             status_text: "Ready".to_string(),
             status_toast: None,
             is_syncing: false,
@@ -85,6 +88,7 @@ impl EmailApp {
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
             settings_view: SettingsView::new(),
+            command_palette: CommandPalette::new(),
         };
 
 
@@ -227,7 +231,304 @@ impl EmailApp {
         }
     }
 
+    pub fn populate_command_palette(&mut self) {
+        let mut items = vec![
+            PaletteItem {
+                id: "compose".into(),
+                title: "Compose New Email".into(),
+                category: "Actions".into(),
+                shortcut: Some("c".into()),
+                action: PaletteAction::Compose,
+            },
+            PaletteItem {
+                id: "sync".into(),
+                title: "Sync All Mailboxes".into(),
+                category: "Actions".into(),
+                shortcut: Some("F5".into()),
+                action: PaletteAction::SyncAll,
+            },
+            PaletteItem {
+                id: "settings".into(),
+                title: "Open Settings".into(),
+                category: "Navigation".into(),
+                shortcut: Some("Cmd+,".into()),
+                action: PaletteAction::OpenSettings,
+            },
+            PaletteItem {
+                id: "focus_search".into(),
+                title: "Search Messages".into(),
+                category: "Navigation".into(),
+                shortcut: Some("/".into()),
+                action: PaletteAction::FocusSearch,
+            },
+            PaletteItem {
+                id: "toggle_sidebar".into(),
+                title: "Toggle Left Sidebar".into(),
+                category: "View".into(),
+                shortcut: None,
+                action: PaletteAction::ToggleSidebar,
+            },
+            PaletteItem {
+                id: "toggle_list".into(),
+                title: "Toggle Message List Pane".into(),
+                category: "View".into(),
+                shortcut: None,
+                action: PaletteAction::ToggleMessageList,
+            },
+            PaletteItem {
+                id: "folder_unread".into(),
+                title: "Smart View: Unread Messages".into(),
+                category: "Folders".into(),
+                shortcut: None,
+                action: PaletteAction::SelectFolder("unified_unread".into()),
+            },
+            PaletteItem {
+                id: "folder_flagged".into(),
+                title: "Smart View: Starred / Flagged".into(),
+                category: "Folders".into(),
+                shortcut: None,
+                action: PaletteAction::SelectFolder("unified_flagged".into()),
+            },
+        ];
+
+        // Add accounts and their custom folders
+        for acc in &self.accounts {
+            if let Some(folders) = self.folders_by_account.get(&acc.id) {
+                for f in folders {
+                    items.push(PaletteItem {
+                        id: format!("folder_{}", f.id),
+                        title: format!("{} → {}", acc.email, f.display_name),
+                        category: "Account Folders".into(),
+                        shortcut: None,
+                        action: PaletteAction::SelectFolder(f.id.clone()),
+                    });
+                }
+            }
+        }
+
+        // Add message actions if an email is selected
+        if self.selected_message_id.is_some() {
+            items.push(PaletteItem {
+                id: "reply".into(),
+                title: "Reply to Current Email".into(),
+                category: "Message".into(),
+                shortcut: Some("r".into()),
+                action: PaletteAction::Reply,
+            });
+            items.push(PaletteItem {
+                id: "reply_all".into(),
+                title: "Reply All to Current Email".into(),
+                category: "Message".into(),
+                shortcut: Some("a".into()),
+                action: PaletteAction::ReplyAll,
+            });
+            items.push(PaletteItem {
+                id: "forward".into(),
+                title: "Forward Current Email".into(),
+                category: "Message".into(),
+                shortcut: Some("f".into()),
+                action: PaletteAction::Forward,
+            });
+            items.push(PaletteItem {
+                id: "star".into(),
+                title: "Toggle Star / Flag".into(),
+                category: "Message".into(),
+                shortcut: Some("s".into()),
+                action: PaletteAction::ToggleStar,
+            });
+            items.push(PaletteItem {
+                id: "mark_read".into(),
+                title: "Mark as Read".into(),
+                category: "Message".into(),
+                shortcut: None,
+                action: PaletteAction::MarkRead,
+            });
+            items.push(PaletteItem {
+                id: "mark_unread".into(),
+                title: "Mark as Unread (Toggle)".into(),
+                category: "Message".into(),
+                shortcut: Some("u".into()),
+                action: PaletteAction::MarkUnread,
+            });
+            items.push(PaletteItem {
+                id: "delete".into(),
+                title: "Delete Email(s)".into(),
+                category: "Message".into(),
+                shortcut: Some("Del".into()),
+                action: PaletteAction::DeleteSelected,
+            });
+        }
+
+        self.command_palette.set_items(items);
+    }
+
+    pub fn execute_palette_action(&mut self, action: PaletteAction) {
+        match action {
+            PaletteAction::Compose => {
+                self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+            }
+            PaletteAction::SyncAll => {
+                let _ = self.cmd_tx.send(SyncCommand::SyncAll);
+            }
+            PaletteAction::OpenSettings => {
+                self.settings_view.open();
+            }
+            PaletteAction::ToggleSidebar => {
+                self.show_sidebar = !self.show_sidebar;
+            }
+            PaletteAction::ToggleMessageList => {
+                self.show_message_list = !self.show_message_list;
+            }
+            PaletteAction::FocusSearch => {
+                self.focus_search_requested = true;
+            }
+            PaletteAction::SelectFolder(fid) => {
+                if fid == "unified_unread" {
+                    self.selected_folder = FolderSelection::UnifiedUnread;
+                } else if fid == "unified_flagged" {
+                    self.selected_folder = FolderSelection::UnifiedFlagged;
+                } else {
+                    for (acc_id, folders) in &self.folders_by_account {
+                        if folders.iter().any(|f| f.id == fid) {
+                            self.selected_folder = FolderSelection::Folder {
+                                account_id: acc_id.clone(),
+                                folder_id: fid.clone(),
+                            };
+                            break;
+                        }
+                    }
+                }
+                self.selected_message_id = None;
+                self.selected_message_ids.clear();
+                self.selected_message_detail = None;
+                self.reload_messages();
+            }
+            PaletteAction::MarkRead => {
+                if let Some(ref mid) = self.selected_message_id {
+                    let _ = self.storage.set_message_read(mid, true);
+                    if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                        m.is_read = true;
+                        let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                            account_id: m.account_id.clone(),
+                            folder_id: m.folder_id.clone(),
+                            uid: m.uid,
+                            is_read: true,
+                        });
+                    }
+                    self.reload_data();
+                }
+            }
+            PaletteAction::MarkUnread => {
+                if let Some(ref mid) = self.selected_message_id {
+                    let _ = self.storage.set_message_read(mid, false);
+                    if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                        m.is_read = false;
+                        let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                            account_id: m.account_id.clone(),
+                            folder_id: m.folder_id.clone(),
+                            uid: m.uid,
+                            is_read: false,
+                        });
+                    }
+                    self.reload_data();
+                }
+            }
+            PaletteAction::ToggleStar => {
+                if let Some(ref mid) = self.selected_message_id {
+                    if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
+                        let new_flag = !m.is_flagged;
+                        m.is_flagged = new_flag;
+                        let _ = self.storage.set_message_flagged(mid, new_flag);
+                        let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
+                            account_id: m.account_id.clone(),
+                            folder_id: m.folder_id.clone(),
+                            uid: m.uid,
+                            is_flagged: new_flag,
+                        });
+                    }
+                    self.reload_data();
+                }
+            }
+            PaletteAction::DeleteSelected => {
+                let to_delete = if !self.selected_message_ids.is_empty() {
+                    self.selected_message_ids.iter().cloned().collect::<Vec<_>>()
+                } else if let Some(ref mid) = self.selected_message_id {
+                    vec![mid.clone()]
+                } else {
+                    Vec::new()
+                };
+
+                for mid in &to_delete {
+                    if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
+                        let _ = self.storage.delete_message(mid);
+                        let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
+                            account_id: m.account_id.clone(),
+                            folder_id: m.folder_id.clone(),
+                            uid: m.uid,
+                        });
+                    }
+                }
+                self.selected_message_ids.clear();
+                self.selected_message_id = None;
+                self.selected_message_detail = None;
+                self.reload_data();
+            }
+            PaletteAction::Reply => {
+                if let Some(ref detail) = self.selected_message_detail {
+                    let quote = detail.body_plain.clone().unwrap_or_default();
+                    self.compose_view.open_reply(
+                        &detail.header.account_id,
+                        &detail.header.from_address,
+                        "",
+                        &detail.header.subject,
+                        detail.header.message_id.clone(),
+                        &quote,
+                        &self.signatures,
+                        true,
+                    );
+                }
+            }
+            PaletteAction::ReplyAll => {
+                if let Some(ref detail) = self.selected_message_detail {
+                    let quote = detail.body_plain.clone().unwrap_or_default();
+                    let my_emails: std::collections::HashSet<String> = self
+                        .accounts
+                        .iter()
+                        .map(|a| a.email.trim().to_lowercase())
+                        .collect();
+                    let (to_str, cc_str) = crate::views::compose::build_reply_all_recipients(&detail.header, &my_emails);
+                    self.compose_view.open_reply(
+                        &detail.header.account_id,
+                        &to_str,
+                        &cc_str,
+                        &detail.header.subject,
+                        detail.header.message_id.clone(),
+                        &quote,
+                        &self.signatures,
+                        true,
+                    );
+                }
+            }
+            PaletteAction::Forward => {
+                if let Some(ref detail) = self.selected_message_detail {
+                    let quote = detail.body_plain.clone().unwrap_or_default();
+                    let subj = format!("Fwd: {}", detail.header.subject);
+                    self.compose_view.open_reply(
+                        &detail.header.account_id,
+                        "",
+                        "",
+                        &subj,
+                        None,
+                        &format!("---------- Forwarded message ---------\nFrom: {}\nSubject: {}\n\n{}", detail.header.from_address, detail.header.subject, quote),
+                        &self.signatures,
+                        true,
+                    );
+                }
+            }
+        }
+    }
 }
+
 
 impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -236,6 +537,12 @@ impl App for EmailApp {
         // Handle Ctrl+, / Cmd+, shortcut to open Settings
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
             self.settings_view.open();
+        }
+
+        // Handle Ctrl+K / Cmd+K / Ctrl+P shortcut to open Command Palette
+        if ctx.input(|i| i.modifiers.command && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::P))) {
+            self.populate_command_palette();
+            self.command_palette.open();
         }
 
         // Top Navigation Bar
@@ -261,6 +568,14 @@ impl App for EmailApp {
 
                 if ui.button(RichText::new("⚙ Settings").size(12.5)).clicked() {
                     self.settings_view.open();
+                }
+
+                if ui.button(RichText::new("🔍 Commands (Ctrl+K)").size(12.5))
+                    .on_hover_text("Open Command Palette (Ctrl+K / Cmd+K)")
+                    .clicked()
+                {
+                    self.populate_command_palette();
+                    self.command_palette.open();
                 }
 
                 ui.separator();
@@ -433,6 +748,7 @@ impl App for EmailApp {
                         &mut self.selected_message_ids,
                         &mut self.last_clicked_idx,
                         &mut self.search_query,
+                        &mut self.focus_search_requested,
                         &available_folders,
                         &mut on_toggle_read,
                         &mut on_toggle_flag,
@@ -785,6 +1101,100 @@ impl App for EmailApp {
 
         if on_data_changed {
             self.reload_data();
+        }
+
+        // Render Command Palette
+        if let Some(action) = self.command_palette.show(ctx) {
+            self.execute_palette_action(action);
+        }
+
+        // Global Keyboard Shortcuts (active when no modal is open and no text input is focused)
+        let any_modal_open = self.command_palette.is_open
+            || self.compose_view.is_open
+            || self.settings_view.is_open
+            || self.account_setup_view.is_open;
+
+        if !any_modal_open && !ctx.wants_keyboard_input() {
+            // j / Down: Next message
+            if ctx.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
+                if !self.messages.is_empty() {
+                    let current_idx = self
+                        .selected_message_id
+                        .as_ref()
+                        .and_then(|id| self.messages.iter().position(|m| &m.id == id));
+                    let next_idx = match current_idx {
+                        Some(idx) => (idx + 1).min(self.messages.len() - 1),
+                        None => 0,
+                    };
+                    self.selected_message_id = Some(self.messages[next_idx].id.clone());
+                }
+            }
+
+            // k / Up: Previous message
+            if ctx.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
+                if !self.messages.is_empty() {
+                    let current_idx = self
+                        .selected_message_id
+                        .as_ref()
+                        .and_then(|id| self.messages.iter().position(|m| &m.id == id));
+                    let prev_idx = match current_idx {
+                        Some(idx) => idx.saturating_sub(1),
+                        None => 0,
+                    };
+                    self.selected_message_id = Some(self.messages[prev_idx].id.clone());
+                }
+            }
+
+            // x: Toggle message selection in batch
+            if ctx.input(|i| i.key_pressed(egui::Key::X)) {
+                if let Some(ref mid) = self.selected_message_id {
+                    if self.selected_message_ids.contains(mid) {
+                        self.selected_message_ids.remove(mid);
+                    } else {
+                        self.selected_message_ids.insert(mid.clone());
+                    }
+                }
+            }
+
+            // c: Compose
+            if ctx.input(|i| i.key_pressed(egui::Key::C)) {
+                self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+            }
+
+            // r: Reply
+            if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+                self.execute_palette_action(PaletteAction::Reply);
+            }
+
+            // a: Reply All
+            if ctx.input(|i| i.key_pressed(egui::Key::A)) {
+                self.execute_palette_action(PaletteAction::ReplyAll);
+            }
+
+            // f: Forward
+            if ctx.input(|i| i.key_pressed(egui::Key::F)) {
+                self.execute_palette_action(PaletteAction::Forward);
+            }
+
+            // s: Star / Flag
+            if ctx.input(|i| i.key_pressed(egui::Key::S)) {
+                self.execute_palette_action(PaletteAction::ToggleStar);
+            }
+
+            // u: Read / Unread
+            if ctx.input(|i| i.key_pressed(egui::Key::U)) {
+                self.execute_palette_action(PaletteAction::MarkUnread);
+            }
+
+            // Delete / Backspace: Delete
+            if ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+                self.execute_palette_action(PaletteAction::DeleteSelected);
+            }
+
+            // /: Search focus
+            if ctx.input(|i| i.key_pressed(egui::Key::Slash)) {
+                self.focus_search_requested = true;
+            }
         }
 
         // Floating Toast Notification

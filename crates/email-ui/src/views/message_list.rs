@@ -15,6 +15,7 @@ impl MessageListView {
         selected_ids: &mut HashSet<String>,
         last_clicked_idx: &mut Option<usize>,
         search_query: &mut String,
+        focus_search_requested: &mut bool,
         available_folders: &[Folder],
         on_toggle_read: &mut Option<(String, bool)>,
         on_toggle_flag: &mut Option<(String, bool)>,
@@ -141,12 +142,16 @@ impl MessageListView {
                 search_ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     ui.label(RichText::new("🔍").size(12.0).color(AppTheme::TEXT_MUTED));
-                    let _response = ui.add(
+                    let response = ui.add(
                         egui::TextEdit::singleline(search_query)
-                            .hint_text("Search emails (subject, sender, content)...")
+                            .hint_text("Search emails (subject, sender, content)... [ / ]")
                             .frame(false)
                             .desired_width(search_width - 70.0),
                     );
+                    if *focus_search_requested {
+                        response.request_focus();
+                        *focus_search_requested = false;
+                    }
                     if !search_query.is_empty() {
                         if ui.small_button("✖").clicked() {
                             search_query.clear();
