@@ -213,7 +213,7 @@ impl SidebarView {
         is_selected: bool,
         mut on_click: impl FnMut(),
     ) {
-        let height = 28.0;
+        let height = 34.0;
         let width = ui.available_width().max(160.0);
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(width, height),
@@ -224,7 +224,7 @@ impl SidebarView {
             on_click();
         }
 
-        // Draw background
+        // Draw background with clean inner margins
         let bg = if is_selected {
             AppTheme::BG_SELECTED
         } else if response.hovered() {
@@ -233,20 +233,23 @@ impl SidebarView {
             Color32::TRANSPARENT
         };
 
-        ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
+        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
 
         if is_selected {
-            // Accent bar on the left
-            let indicator = Rect::from_min_size(rect.min, Vec2::new(3.0, height));
+            // Accent bar on the left with vertical margin
+            let indicator = Rect::from_min_size(
+                rect.min + Vec2::new(3.0, 6.0),
+                Vec2::new(3.5, height - 12.0),
+            );
             ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::ACCENT_PRIMARY);
         }
 
-        // Content
+        // Content layout
         let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        child_ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.label(RichText::new(icon).size(13.0));
-            ui.add_space(2.0);
+        child_ui.horizontal_centered(|ui| {
+            ui.add_space(14.0);
+            ui.label(RichText::new(icon).size(14.0));
+            ui.add_space(6.0);
 
             let text_color = if is_selected {
                 Color32::WHITE
@@ -257,24 +260,24 @@ impl SidebarView {
             };
 
             let text_style = if unread > 0 {
-                RichText::new(name).size(12.5).strong().color(text_color)
+                RichText::new(name).size(13.0).strong().color(text_color)
             } else {
-                RichText::new(name).size(12.5).color(text_color)
+                RichText::new(name).size(13.0).color(text_color)
             };
 
             ui.label(text_style);
 
-            // Badge Pill for unread messages
+            // Badge Pill for unread messages with generous right padding
             if unread > 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
+                    ui.add_space(12.0);
                     let badge_text = if unread > 999 {
                         "999+".to_string()
                     } else {
                         unread.to_string()
                     };
                     let (badge_rect, _) = ui.allocate_exact_size(
-                        Vec2::new(20.0 + (badge_text.len() as f32 * 2.0), 16.0),
+                        Vec2::new(22.0 + (badge_text.len() as f32 * 2.0), 18.0),
                         Sense::hover(),
                     );
                     let badge_bg = if is_selected {
@@ -282,12 +285,12 @@ impl SidebarView {
                     } else {
                         AppTheme::BG_CARD
                     };
-                    ui.painter().rect_filled(badge_rect, Rounding::same(8.0), badge_bg);
+                    ui.painter().rect_filled(badge_rect, Rounding::same(9.0), badge_bg);
                     ui.painter().text(
                         badge_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         badge_text,
-                        egui::FontId::proportional(10.0),
+                        egui::FontId::proportional(10.5),
                         if is_selected { Color32::WHITE } else { AppTheme::TEXT_PRIMARY },
                     );
                 });

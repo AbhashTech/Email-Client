@@ -88,7 +88,6 @@ pub async fn sync_single_folder(
         .map_err(|e| EmailError::Imap(format!("Failed to select {}: {}", folder.remote_name, e)))?;
 
     let total_messages = mailbox.exists;
-    let unread_messages = mailbox.unseen.unwrap_or(0);
     let uid_validity = mailbox.uid_validity.unwrap_or(0);
 
     // Build date-window search query
@@ -112,7 +111,7 @@ pub async fn sync_single_folder(
             &folder.id,
             folder.last_synced_uid,
             total_messages,
-            unread_messages,
+            0,
         );
         return Ok(0);
     }
@@ -215,10 +214,9 @@ pub async fn sync_single_folder(
 
     folder.last_synced_uid = max_uid;
     folder.total_messages = total_messages;
-    folder.unread_messages = unread_messages;
     folder.uid_validity = uid_validity;
 
-    let _ = storage.update_folder_stats(&folder.id, max_uid, total_messages, unread_messages);
+    let _ = storage.update_folder_stats(&folder.id, max_uid, total_messages, 0);
 
     info!(
         "Synced and offline-cached {} messages for folder '{}'",

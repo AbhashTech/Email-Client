@@ -207,9 +207,11 @@ impl Storage {
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, account_id, remote_name, display_name, delimiter, attributes,
-                        is_synced, last_synced_uid, uid_validity, total_messages, unread_messages
-                 FROM folders WHERE account_id = ?1 ORDER BY display_name ASC",
+                "SELECT f.id, f.account_id, f.remote_name, f.display_name, f.delimiter, f.attributes,
+                        f.is_synced, f.last_synced_uid, f.uid_validity,
+                        (SELECT COUNT(*) FROM messages m WHERE m.folder_id = f.id AND m.is_deleted = 0) as total_count,
+                        (SELECT COUNT(*) FROM messages m WHERE m.folder_id = f.id AND m.is_read = 0 AND m.is_deleted = 0) as unread_count
+                 FROM folders f WHERE f.account_id = ?1 ORDER BY f.display_name ASC",
             )
             .map_err(|e| EmailError::Database(e.to_string()))?;
 
@@ -218,6 +220,8 @@ impl Storage {
                 let attrs_json: String = row.get(5)?;
                 let attrs: Vec<String> = serde_json::from_str(&attrs_json).unwrap_or_default();
                 let is_synced: i32 = row.get(6)?;
+                let total_messages: i64 = row.get(9)?;
+                let unread_messages: i64 = row.get(10)?;
 
                 Ok(Folder {
                     id: row.get(0)?,
@@ -229,8 +233,8 @@ impl Storage {
                     is_synced: is_synced == 1,
                     last_synced_uid: row.get(7)?,
                     uid_validity: row.get(8)?,
-                    total_messages: row.get(9)?,
-                    unread_messages: row.get(10)?,
+                    total_messages: total_messages as u32,
+                    unread_messages: unread_messages as u32,
                 })
             })
             .map_err(|e| EmailError::Database(e.to_string()))?;

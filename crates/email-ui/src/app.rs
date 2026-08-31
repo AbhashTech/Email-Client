@@ -381,6 +381,7 @@ impl App for EmailApp {
                     detail.header.is_read = is_read;
                 }
             }
+            self.reload_data();
         }
 
         if let Some((msg_id, is_flag)) = on_toggle_flag {
@@ -393,6 +394,7 @@ impl App for EmailApp {
                     detail.header.is_flagged = is_flag;
                 }
             }
+            self.reload_data();
         }
 
         if prev_msg_id != self.selected_message_id {
@@ -404,6 +406,7 @@ impl App for EmailApp {
                 if let Ok(detail_opt) = self.storage.get_message_detail(mid) {
                     self.selected_message_detail = detail_opt;
                 }
+                self.reload_data();
             }
         }
 
