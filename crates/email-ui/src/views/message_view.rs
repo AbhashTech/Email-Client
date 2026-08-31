@@ -235,12 +235,12 @@ impl MessageViewPane {
                                     ui.add_space(8.0);
                                 }
                                 HtmlBlock::Heading { level, text, is_center, color } => {
-                                    ui.add_space(4.0);
+                                    ui.add_space(8.0);
                                     let mut rt = RichText::new(text).strong();
                                     if level == 1 {
-                                        rt = rt.size(20.0);
+                                        rt = rt.size(24.0);
                                     } else {
-                                        rt = rt.size(16.5);
+                                        rt = rt.size(18.0);
                                     }
 
                                     if let Some((r, g, b)) = color {
@@ -259,23 +259,23 @@ impl MessageViewPane {
                                             ui.heading(rt);
                                         });
                                     }
-                                    ui.add_space(4.0);
+                                    ui.add_space(8.0);
                                 }
                                 HtmlBlock::Button { text, url, bg_color, text_color, is_center } => {
-                                    ui.add_space(6.0);
+                                    ui.add_space(8.0);
                                     let bg = Color32::from_rgb(bg_color.0, bg_color.1, bg_color.2);
                                     let fg = Color32::from_rgb(text_color.0, text_color.1, text_color.2);
 
                                     let btn_ui = |ui: &mut egui::Ui| {
                                         let btn = egui::Button::new(
                                             RichText::new(&text)
-                                                .size(13.5)
+                                                .size(14.0)
                                                 .strong()
                                                 .color(fg),
                                         )
                                         .fill(bg)
-                                        .rounding(Rounding::same(20.0))
-                                        .min_size(Vec2::new(120.0, 36.0));
+                                        .rounding(Rounding::same(8.0))
+                                        .min_size(Vec2::new(140.0, 40.0));
 
                                         if ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                             ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
@@ -526,31 +526,6 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32) {
         ui.set_max_width(wrap_width);
         ui.horizontal_wrapped(|ui| {
             for span in spans {
-                if span.is_button || (span.link_url.is_some() && span.bg_color.is_some()) {
-                    let bg = span.bg_color
-                        .map(|(r, g, b)| Color32::from_rgb(r, g, b))
-                        .unwrap_or(AppTheme::ACCENT_PRIMARY);
-                    let fg = span.text_color
-                        .map(|(r, g, b)| Color32::from_rgb(r, g, b))
-                        .unwrap_or(Color32::WHITE);
-
-                    let btn = egui::Button::new(
-                        RichText::new(&span.text)
-                            .size(13.0)
-                            .strong()
-                            .color(fg),
-                    )
-                    .fill(bg)
-                    .rounding(Rounding::same(16.0));
-
-                    if ui.add(btn).clicked() {
-                        if let Some(ref url) = span.link_url {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                        }
-                    }
-                    continue;
-                }
-
                 let mut text = RichText::new(&span.text).size(13.5);
                 match span.style {
                     TextStyle::Normal => {

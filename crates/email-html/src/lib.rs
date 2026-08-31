@@ -19,8 +19,6 @@ pub struct FormattedSpan {
     pub style: TextStyle,
     pub link_url: Option<String>,
     pub text_color: Option<(u8, u8, u8)>,
-    pub bg_color: Option<(u8, u8, u8)>,
-    pub is_button: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -133,12 +131,11 @@ pub fn parse_color_string(s: &str) -> Option<(u8, u8, u8)> {
     None
 }
 
-fn parse_inline_styles(style_attr: &str) -> (Option<(u8, u8, u8)>, Option<(u8, u8, u8)>, Option<TextStyle>, bool, bool) {
+fn parse_inline_styles(style_attr: &str) -> (Option<(u8, u8, u8)>, Option<(u8, u8, u8)>, Option<TextStyle>, bool) {
     let mut text_color = None;
     let mut bg_color = None;
     let mut text_style = None;
     let mut is_center = false;
-    let mut is_btn = false;
 
     for decl in style_attr.split(';') {
         let mut parts = decl.splitn(2, ':');
@@ -150,9 +147,6 @@ fn parse_inline_styles(style_attr: &str) -> (Option<(u8, u8, u8)>, Option<(u8, u
                 text_color = parse_color_string(val_clean);
             } else if prop_clean == "background-color" || prop_clean == "background" {
                 bg_color = parse_color_string(val_clean);
-                if bg_color.is_some() {
-                    is_btn = true;
-                }
             } else if prop_clean == "font-size" {
                 if let Some(px_str) = val_clean.strip_suffix("px") {
                     if let Ok(px) = px_str.trim().parse::<f32>() {
@@ -175,13 +169,11 @@ fn parse_inline_styles(style_attr: &str) -> (Option<(u8, u8, u8)>, Option<(u8, u
                 }
             } else if prop_clean == "text-align" && val_clean.to_lowercase().contains("center") {
                 is_center = true;
-            } else if prop_clean == "border-radius" || (prop_clean == "display" && val_clean.contains("inline-block")) {
-                is_btn = true;
             }
         }
     }
 
-    (text_color, bg_color, text_style, is_center, is_btn)
+    (text_color, bg_color, text_style, is_center)
 }
 
 /// Sanitize and parse HTML into structured blocks suitable for lightweight native rendering
@@ -204,7 +196,6 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
     let mut current_color: Option<(u8, u8, u8)> = None;
     let mut current_bg: Option<(u8, u8, u8)> = None;
     let mut current_override_style: Option<TextStyle> = None;
-    let mut current_is_button = false;
     let mut current_is_center = false;
     let mut current_link: Option<String> = None;
 
@@ -235,8 +226,6 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                     style,
                     link_url: current_link.clone(),
                     text_color: current_color,
-                    bg_color: current_bg,
-                    is_button: current_is_button,
                 });
             }
         }
@@ -254,7 +243,7 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
 
         // Check inline style
         if let Some(style_str) = extract_attribute(tag_attrs, "style") {
-            let (col, bg, st_opt, center, btn) = parse_inline_styles(&style_str);
+            let (col, bg, st_opt, center) = parse_inline_styles(&style_str);
             if col.is_some() {
                 current_color = col;
             }
@@ -266,9 +255,6 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             }
             if center {
                 current_is_center = true;
-            }
-            if btn {
-                current_is_button = true;
             }
         }
 
@@ -298,19 +284,20 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                 if let (Some(url), Some(bg)) = (current_link.take(), current_bg.take()) {
                     if !current_spans.is_empty() {
                         let btn_text = current_spans.iter().map(|s| s.text.as_str()).collect::<String>();
-                        current_spans.clear();
-                        let fg = current_color.unwrap_or((255, 255, 255));
-                        blocks.push(HtmlBlock::Button {
-                            text: btn_text,
-                            url,
-                            bg_color: bg,
-                            text_color: fg,
-                            is_center: current_is_center,
-                        });
+                        if btn_text.len() <= 35 && !btn_text.contains('\n') {
+                            current_spans.clear();
+                            let fg = current_color.unwrap_or((255, 255, 255));
+                            blocks.push(HtmlBlock::Button {
+                                text: btn_text,
+                                url,
+                                bg_color: bg,
+                                text_color: fg,
+                                is_center: current_is_center,
+                            });
+                        }
                     }
                 }
                 current_link = None;
-                current_is_button = false;
             }
             "img" => {
                 if !current_spans.is_empty() {
@@ -338,10 +325,22 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             }
             "/p" | "/div" | "/tr" | "/table" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph {
-                        spans: std::mem::take(&mut current_spans),
-                        is_center: current_is_center,
-                    });
+                    // Check if this paragraph is actually a single large heading
+                    if current_spans.len() == 1 && matches!(current_spans[0].style, TextStyle::Heading1 | TextStyle::Heading2) {
+                        let span = current_spans.remove(0);
+                        let level = if span.style == TextStyle::Heading1 { 1 } else { 2 };
+                        blocks.push(HtmlBlock::Heading {
+                            level,
+                            text: span.text,
+                            is_center: current_is_center,
+                            color: span.text_color,
+                        });
+                    } else {
+                        blocks.push(HtmlBlock::Paragraph {
+                            spans: std::mem::take(&mut current_spans),
+                            is_center: current_is_center,
+                        });
+                    }
                 }
                 current_is_center = false;
                 current_color = None;
@@ -430,8 +429,6 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                 style: TextStyle::Normal,
                 link_url: None,
                 text_color: None,
-                bg_color: None,
-                is_button: false,
             });
         }
     }
