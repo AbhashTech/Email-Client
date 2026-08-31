@@ -18,16 +18,38 @@ pub struct FormattedSpan {
     pub text: String,
     pub style: TextStyle,
     pub link_url: Option<String>,
+    pub text_color: Option<(u8, u8, u8)>,
+    pub bg_color: Option<(u8, u8, u8)>,
+    pub is_button: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum HtmlBlock {
-    Paragraph(Vec<FormattedSpan>),
-    Heading { level: u8, text: String },
+    Paragraph {
+        spans: Vec<FormattedSpan>,
+        is_center: bool,
+    },
+    Heading {
+        level: u8,
+        text: String,
+        is_center: bool,
+        color: Option<(u8, u8, u8)>,
+    },
+    Button {
+        text: String,
+        url: String,
+        bg_color: (u8, u8, u8),
+        text_color: (u8, u8, u8),
+        is_center: bool,
+    },
     ListItem(Vec<FormattedSpan>),
     Blockquote(String),
     CodeBlock(String),
-    Image { src: String, alt: Option<String> },
+    Image {
+        src: String,
+        alt: Option<String>,
+        is_center: bool,
+    },
     HorizontalRule,
 }
 
@@ -72,6 +94,96 @@ pub fn sanitize_raw_html(html: &str) -> String {
     META_LINK_RE.replace_all(&s4, "").to_string()
 }
 
+pub fn parse_color_string(s: &str) -> Option<(u8, u8, u8)> {
+    let clean = s.trim().to_lowercase();
+    if clean.starts_with('#') {
+        let hex = clean.trim_start_matches('#');
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some((r, g, b));
+        } else if hex.len() == 3 {
+            let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+            return Some((r, g, b));
+        }
+    } else if clean.starts_with("rgb(") && clean.ends_with(')') {
+        let inner = &clean[4..clean.len() - 1];
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() >= 3 {
+            let r = parts[0].parse::<u8>().ok()?;
+            let g = parts[1].parse::<u8>().ok()?;
+            let b = parts[2].parse::<u8>().ok()?;
+            return Some((r, g, b));
+        }
+    } else {
+        match clean.as_str() {
+            "black" => return Some((0, 0, 0)),
+            "white" => return Some((255, 255, 255)),
+            "red" => return Some((220, 38, 38)),
+            "orange" => return Some((234, 88, 12)),
+            "blue" => return Some((37, 99, 235)),
+            "green" => return Some((22, 163, 74)),
+            "gray" | "grey" => return Some((107, 114, 128)),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_inline_styles(style_attr: &str) -> (Option<(u8, u8, u8)>, Option<(u8, u8, u8)>, Option<TextStyle>, bool, bool) {
+    let mut text_color = None;
+    let mut bg_color = None;
+    let mut text_style = None;
+    let mut is_center = false;
+    let mut is_btn = false;
+
+    for decl in style_attr.split(';') {
+        let mut parts = decl.splitn(2, ':');
+        if let (Some(prop), Some(val)) = (parts.next(), parts.next()) {
+            let prop_clean = prop.trim().to_lowercase();
+            let val_clean = val.trim();
+
+            if prop_clean == "color" {
+                text_color = parse_color_string(val_clean);
+            } else if prop_clean == "background-color" || prop_clean == "background" {
+                bg_color = parse_color_string(val_clean);
+                if bg_color.is_some() {
+                    is_btn = true;
+                }
+            } else if prop_clean == "font-size" {
+                if let Some(px_str) = val_clean.strip_suffix("px") {
+                    if let Ok(px) = px_str.trim().parse::<f32>() {
+                        if px >= 22.0 {
+                            text_style = Some(TextStyle::Heading1);
+                        } else if px >= 17.0 {
+                            text_style = Some(TextStyle::Heading2);
+                        } else if px >= 15.0 {
+                            text_style = Some(TextStyle::Heading3);
+                        }
+                    }
+                } else if val_clean.contains("large") || val_clean.contains("x-large") || val_clean.contains("xx-large") {
+                    text_style = Some(TextStyle::Heading1);
+                }
+            } else if prop_clean == "font-weight" {
+                if val_clean == "bold" || val_clean == "700" || val_clean == "800" || val_clean == "900" || val_clean == "bolder" {
+                    if text_style.is_none() {
+                        text_style = Some(TextStyle::Bold);
+                    }
+                }
+            } else if prop_clean == "text-align" && val_clean.to_lowercase().contains("center") {
+                is_center = true;
+            } else if prop_clean == "border-radius" || (prop_clean == "display" && val_clean.contains("inline-block")) {
+                is_btn = true;
+            }
+        }
+    }
+
+    (text_color, bg_color, text_style, is_center, is_btn)
+}
+
 /// Sanitize and parse HTML into structured blocks suitable for lightweight native rendering
 pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
     if html.trim().is_empty() {
@@ -89,6 +201,11 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
     let mut is_bold = false;
     let mut is_italic = false;
     let mut is_code = false;
+    let mut current_color: Option<(u8, u8, u8)> = None;
+    let mut current_bg: Option<(u8, u8, u8)> = None;
+    let mut current_override_style: Option<TextStyle> = None;
+    let mut current_is_button = false;
+    let mut current_is_center = false;
     let mut current_link: Option<String> = None;
 
     let mut last_idx = 0;
@@ -99,7 +216,9 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             let decoded = html_escape::decode_html_entities(text_before).to_string();
             let clean_text = clean_whitespace(&decoded);
             if !clean_text.is_empty() {
-                let style = if is_code {
+                let style = if let Some(ref st) = current_override_style {
+                    st.clone()
+                } else if is_code {
                     TextStyle::Code
                 } else if is_bold && is_italic {
                     TextStyle::BoldItalic
@@ -115,6 +234,9 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                     text: clean_text,
                     style,
                     link_url: current_link.clone(),
+                    text_color: current_color,
+                    bg_color: current_bg,
+                    is_button: current_is_button,
                 });
             }
         }
@@ -123,6 +245,40 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
         let tag_name = tag_match.get(1).unwrap().as_str().to_lowercase();
         let tag_attrs = tag_match.get(2).map(|m| m.as_str()).unwrap_or("");
 
+        // Check align attribute
+        if let Some(align) = extract_attribute(tag_attrs, "align") {
+            if align.to_lowercase() == "center" {
+                current_is_center = true;
+            }
+        }
+
+        // Check inline style
+        if let Some(style_str) = extract_attribute(tag_attrs, "style") {
+            let (col, bg, st_opt, center, btn) = parse_inline_styles(&style_str);
+            if col.is_some() {
+                current_color = col;
+            }
+            if bg.is_some() {
+                current_bg = bg;
+            }
+            if st_opt.is_some() {
+                current_override_style = st_opt;
+            }
+            if center {
+                current_is_center = true;
+            }
+            if btn {
+                current_is_button = true;
+            }
+        }
+
+        // Check font color
+        if let Some(col_attr) = extract_attribute(tag_attrs, "color") {
+            if let Some(c) = parse_color_string(&col_attr) {
+                current_color = Some(c);
+            }
+        }
+
         match tag_name.as_str() {
             "b" | "strong" => is_bold = true,
             "/b" | "/strong" => is_bold = false,
@@ -130,34 +286,74 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             "/i" | "/em" => is_italic = false,
             "code" => is_code = true,
             "/code" => is_code = false,
+            "center" => current_is_center = true,
+            "/center" => current_is_center = false,
             "a" => {
                 if let Some(src) = extract_attribute(tag_attrs, "href") {
                     current_link = Some(src);
                 }
             }
-            "/a" => current_link = None,
+            "/a" => {
+                // If this link was styled as a button with a background color
+                if let (Some(url), Some(bg)) = (current_link.take(), current_bg.take()) {
+                    if !current_spans.is_empty() {
+                        let btn_text = current_spans.iter().map(|s| s.text.as_str()).collect::<String>();
+                        current_spans.clear();
+                        let fg = current_color.unwrap_or((255, 255, 255));
+                        blocks.push(HtmlBlock::Button {
+                            text: btn_text,
+                            url,
+                            bg_color: bg,
+                            text_color: fg,
+                            is_center: current_is_center,
+                        });
+                    }
+                }
+                current_link = None;
+                current_is_button = false;
+            }
             "img" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
                 if let Some(src) = extract_attribute(tag_attrs, "src") {
                     let alt = extract_attribute(tag_attrs, "alt");
-                    blocks.push(HtmlBlock::Image { src, alt });
+                    blocks.push(HtmlBlock::Image {
+                        src,
+                        alt,
+                        is_center: current_is_center,
+                    });
                 }
             }
             "p" | "div" | "tr" | "table" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
             }
             "/p" | "/div" | "/tr" | "/table" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
+                current_is_center = false;
+                current_color = None;
+                current_bg = None;
+                current_override_style = None;
             }
             "li" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
             }
             "/li" => {
@@ -167,13 +363,19 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
             }
             "hr" | "hr/" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
                 blocks.push(HtmlBlock::HorizontalRule);
             }
             "h1" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
                 is_bold = true;
             }
@@ -182,12 +384,20 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                 if !current_spans.is_empty() {
                     let text = current_spans.iter().map(|s| s.text.as_str()).collect::<String>();
                     current_spans.clear();
-                    blocks.push(HtmlBlock::Heading { level: 1, text });
+                    blocks.push(HtmlBlock::Heading {
+                        level: 1,
+                        text,
+                        is_center: current_is_center,
+                        color: current_color,
+                    });
                 }
             }
             "h2" | "h3" | "h4" => {
                 if !current_spans.is_empty() {
-                    blocks.push(HtmlBlock::Paragraph(std::mem::take(&mut current_spans)));
+                    blocks.push(HtmlBlock::Paragraph {
+                        spans: std::mem::take(&mut current_spans),
+                        is_center: current_is_center,
+                    });
                 }
                 is_bold = true;
             }
@@ -196,7 +406,12 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                 if !current_spans.is_empty() {
                     let text = current_spans.iter().map(|s| s.text.as_str()).collect::<String>();
                     current_spans.clear();
-                    blocks.push(HtmlBlock::Heading { level: 2, text });
+                    blocks.push(HtmlBlock::Heading {
+                        level: 2,
+                        text,
+                        is_center: current_is_center,
+                        color: current_color,
+                    });
                 }
             }
             _ => {}
@@ -214,17 +429,23 @@ pub fn parse_html_to_blocks(html: &str) -> Vec<HtmlBlock> {
                 text: clean_text,
                 style: TextStyle::Normal,
                 link_url: None,
+                text_color: None,
+                bg_color: None,
+                is_button: false,
             });
         }
     }
 
     if !current_spans.is_empty() {
-        blocks.push(HtmlBlock::Paragraph(current_spans));
+        blocks.push(HtmlBlock::Paragraph {
+            spans: current_spans,
+            is_center: current_is_center,
+        });
     }
 
     // Filter out completely empty paragraphs
     blocks.into_iter().filter(|b| match b {
-        HtmlBlock::Paragraph(spans) => spans.iter().any(|s| !s.text.trim().is_empty()),
+        HtmlBlock::Paragraph { spans, .. } => spans.iter().any(|s| !s.text.trim().is_empty()),
         HtmlBlock::ListItem(spans) => spans.iter().any(|s| !s.text.trim().is_empty()),
         HtmlBlock::Heading { text, .. } => !text.trim().is_empty(),
         _ => true,
@@ -268,7 +489,6 @@ fn extract_attribute(attrs: &str, attr_name: &str) -> Option<String> {
     }
     None
 }
-
 
 fn clean_whitespace(s: &str) -> String {
     s.replace('\u{00A0}', " ")

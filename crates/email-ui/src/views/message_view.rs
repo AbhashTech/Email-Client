@@ -224,17 +224,72 @@ impl MessageViewPane {
                     } else {
                         for block in blocks {
                             match block {
-                                HtmlBlock::Paragraph(spans) => {
-                                    render_spans(ui, &spans, wrap_width);
+                                HtmlBlock::Paragraph { spans, is_center } => {
+                                    if is_center {
+                                        ui.vertical_centered(|ui| {
+                                            render_spans(ui, &spans, wrap_width.min(680.0));
+                                        });
+                                    } else {
+                                        render_spans(ui, &spans, wrap_width);
+                                    }
                                     ui.add_space(8.0);
                                 }
-                                HtmlBlock::Heading { level: _, text } => {
+                                HtmlBlock::Heading { level, text, is_center, color } => {
                                     ui.add_space(4.0);
-                                    ui.scope(|ui| {
-                                        ui.set_max_width(wrap_width);
-                                        ui.heading(RichText::new(text).strong().color(AppTheme::TEXT_PRIMARY));
-                                    });
+                                    let mut rt = RichText::new(text).strong();
+                                    if level == 1 {
+                                        rt = rt.size(20.0);
+                                    } else {
+                                        rt = rt.size(16.5);
+                                    }
+
+                                    if let Some((r, g, b)) = color {
+                                        rt = rt.color(Color32::from_rgb(r, g, b));
+                                    } else {
+                                        rt = rt.color(AppTheme::TEXT_PRIMARY);
+                                    }
+
+                                    if is_center {
+                                        ui.vertical_centered(|ui| {
+                                            ui.heading(rt);
+                                        });
+                                    } else {
+                                        ui.scope(|ui| {
+                                            ui.set_max_width(wrap_width);
+                                            ui.heading(rt);
+                                        });
+                                    }
                                     ui.add_space(4.0);
+                                }
+                                HtmlBlock::Button { text, url, bg_color, text_color, is_center } => {
+                                    ui.add_space(6.0);
+                                    let bg = Color32::from_rgb(bg_color.0, bg_color.1, bg_color.2);
+                                    let fg = Color32::from_rgb(text_color.0, text_color.1, text_color.2);
+
+                                    let btn_ui = |ui: &mut egui::Ui| {
+                                        let btn = egui::Button::new(
+                                            RichText::new(&text)
+                                                .size(13.5)
+                                                .strong()
+                                                .color(fg),
+                                        )
+                                        .fill(bg)
+                                        .rounding(Rounding::same(20.0))
+                                        .min_size(Vec2::new(120.0, 36.0));
+
+                                        if ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                            ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+                                        }
+                                    };
+
+                                    if is_center {
+                                        ui.vertical_centered(|ui| {
+                                            btn_ui(ui);
+                                        });
+                                    } else {
+                                        btn_ui(ui);
+                                    }
+                                    ui.add_space(8.0);
                                 }
                                 HtmlBlock::ListItem(spans) => {
                                     ui.horizontal(|ui| {
@@ -257,7 +312,7 @@ impl MessageViewPane {
                                     });
                                     ui.add_space(6.0);
                                 }
-                                HtmlBlock::Image { src, alt } => {
+                                HtmlBlock::Image { src, alt, is_center } => {
                                     ui.add_space(6.0);
                                     let resolved_uri = if src.starts_with("cid:") {
                                         let cid_key = src.trim_start_matches("cid:").trim_matches(|c| c == '<' || c == '>');
@@ -276,53 +331,64 @@ impl MessageViewPane {
                                         src.clone()
                                     };
 
-                                    let img_widget = egui::Image::new(&resolved_uri)
-                                        .rounding(Rounding::same(6.0))
-                                        .sense(Sense::click());
+                                    let mut img_render = |ui: &mut egui::Ui| {
+                                        let img_widget = egui::Image::new(&resolved_uri)
+                                            .max_width(wrap_width.min(680.0))
+                                            .rounding(Rounding::same(6.0))
+                                            .sense(Sense::click());
 
-                                    let mut response = ui.add(img_widget);
-                                    if let Some(ref alt_text) = alt {
-                                        response = response.on_hover_text(alt_text);
-                                    }
+                                        let mut response = ui.add(img_widget);
+                                        if let Some(ref alt_text) = alt {
+                                            response = response.on_hover_text(alt_text);
+                                        }
 
-                                    // Right click context menu to Save Image
-                                    let img_uri = resolved_uri.clone();
-                                    response.context_menu(|ui| {
-                                        if ui.button(RichText::new("💾 Save Image As...").size(12.5)).clicked() {
-                                            let default_name = if img_uri.starts_with("file://") {
-                                                std::path::Path::new(img_uri.trim_start_matches("file://"))
-                                                    .file_name()
-                                                    .and_then(|n| n.to_str())
-                                                    .unwrap_or("image.png")
-                                                    .to_string()
-                                            } else {
-                                                "image.png".to_string()
-                                            };
+                                        // Right click context menu to Save Image
+                                        let img_uri = resolved_uri.clone();
+                                        response.context_menu(|ui| {
+                                            if ui.button(RichText::new("💾 Save Image As...").size(12.5)).clicked() {
+                                                let default_name = if img_uri.starts_with("file://") {
+                                                    std::path::Path::new(img_uri.trim_start_matches("file://"))
+                                                        .file_name()
+                                                        .and_then(|n| n.to_str())
+                                                        .unwrap_or("image.png")
+                                                        .to_string()
+                                                } else {
+                                                    "image.png".to_string()
+                                                };
 
-                                            let dialog = rfd::FileDialog::new()
-                                                .set_file_name(&default_name)
-                                                .set_title("Save Image As...");
+                                                let dialog = rfd::FileDialog::new()
+                                                    .set_file_name(&default_name)
+                                                    .set_title("Save Image As...");
 
-                                            if let Some(dest_path) = dialog.save_file() {
-                                                if img_uri.starts_with("file://") {
-                                                    let local_path = img_uri.trim_start_matches("file://");
-                                                    if std::fs::copy(local_path, &dest_path).is_ok() {
-                                                        *status_toast = Some(format!("Saved image to {}", dest_path.display()));
-                                                    }
-                                                } else if img_uri.starts_with("data:") {
-                                                    if let Some(comma_pos) = img_uri.find(',') {
-                                                        let b64_data = &img_uri[comma_pos + 1..];
-                                                        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
-                                                            if std::fs::write(&dest_path, decoded).is_ok() {
-                                                                *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                if let Some(dest_path) = dialog.save_file() {
+                                                    if img_uri.starts_with("file://") {
+                                                        let local_path = img_uri.trim_start_matches("file://");
+                                                        if std::fs::copy(local_path, &dest_path).is_ok() {
+                                                            *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                        }
+                                                    } else if img_uri.starts_with("data:") {
+                                                        if let Some(comma_pos) = img_uri.find(',') {
+                                                            let b64_data = &img_uri[comma_pos + 1..];
+                                                            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
+                                                                if std::fs::write(&dest_path, decoded).is_ok() {
+                                                                    *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
+                                                ui.close_menu();
                                             }
-                                            ui.close_menu();
-                                        }
-                                    });
+                                        });
+                                    };
+
+                                    if is_center {
+                                        ui.vertical_centered(|ui| {
+                                            img_render(ui);
+                                        });
+                                    } else {
+                                        img_render(ui);
+                                    }
 
                                     ui.add_space(6.0);
                                 }
@@ -460,31 +526,90 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32) {
         ui.set_max_width(wrap_width);
         ui.horizontal_wrapped(|ui| {
             for span in spans {
+                if span.is_button || (span.link_url.is_some() && span.bg_color.is_some()) {
+                    let bg = span.bg_color
+                        .map(|(r, g, b)| Color32::from_rgb(r, g, b))
+                        .unwrap_or(AppTheme::ACCENT_PRIMARY);
+                    let fg = span.text_color
+                        .map(|(r, g, b)| Color32::from_rgb(r, g, b))
+                        .unwrap_or(Color32::WHITE);
+
+                    let btn = egui::Button::new(
+                        RichText::new(&span.text)
+                            .size(13.0)
+                            .strong()
+                            .color(fg),
+                    )
+                    .fill(bg)
+                    .rounding(Rounding::same(16.0));
+
+                    if ui.add(btn).clicked() {
+                        if let Some(ref url) = span.link_url {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                        }
+                    }
+                    continue;
+                }
+
                 let mut text = RichText::new(&span.text).size(13.5);
                 match span.style {
                     TextStyle::Normal => {
-                        text = text.color(AppTheme::TEXT_PRIMARY);
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                     TextStyle::Bold => {
-                        text = text.strong().color(AppTheme::TEXT_PRIMARY);
+                        text = text.strong();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                     TextStyle::Italic => {
-                        text = text.italics().color(AppTheme::TEXT_SECONDARY);
+                        text = text.italics();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_SECONDARY);
+                        }
                     }
                     TextStyle::BoldItalic => {
-                        text = text.strong().italics().color(AppTheme::TEXT_PRIMARY);
+                        text = text.strong().italics();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                     TextStyle::Code => {
                         text = text.monospace().background_color(AppTheme::BG_CARD).color(Color32::from_rgb(255, 180, 100));
                     }
                     TextStyle::Heading1 => {
-                        text = text.size(18.0).strong().color(AppTheme::TEXT_PRIMARY);
+                        text = text.size(18.0).strong();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                     TextStyle::Heading2 => {
-                        text = text.size(15.0).strong().color(AppTheme::TEXT_PRIMARY);
+                        text = text.size(15.5).strong();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                     TextStyle::Heading3 => {
-                        text = text.size(14.0).strong().color(AppTheme::TEXT_PRIMARY);
+                        text = text.size(14.0).strong();
+                        if let Some((r, g, b)) = span.text_color {
+                            text = text.color(Color32::from_rgb(r, g, b));
+                        } else {
+                            text = text.color(AppTheme::TEXT_PRIMARY);
+                        }
                     }
                 }
 
