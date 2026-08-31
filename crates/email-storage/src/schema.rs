@@ -127,6 +127,18 @@ CREATE TABLE IF NOT EXISTS pgp_keys (
     created_at INTEGER NOT NULL
 );
 
+-- Offline Outbox Auto-Retry Queue
+CREATE TABLE IF NOT EXISTS outbox (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    draft_json TEXT NOT NULL,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 5,
+    next_retry_timestamp INTEGER NOT NULL,
+    last_error TEXT,
+    created_at INTEGER NOT NULL
+);
+
 -- Indexes for lightning fast lookups
 CREATE INDEX IF NOT EXISTS idx_messages_folder_date ON messages(folder_id, date_epoch DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_account_unread ON messages(account_id, is_read);
@@ -135,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_account ON drafts(account_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_emails(send_at_timestamp ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_snooze ON messages(snooze_until);
+CREATE INDEX IF NOT EXISTS idx_outbox_retry ON outbox(next_retry_timestamp ASC);
 
 -- FTS5 Full-Text Search Virtual Table
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

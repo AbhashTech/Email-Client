@@ -248,7 +248,7 @@ impl Folder {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Recipient {
     pub name: Option<String>,
     pub email: String,
@@ -502,6 +502,52 @@ impl ScheduledEmail {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutboxItem {
+    pub id: String,
+    pub account_id: String,
+    pub draft: OutgoingDraft,
+    pub retry_count: u32,
+    pub max_retries: u32,
+    pub next_retry_timestamp: i64,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+}
+
+impl OutboxItem {
+    pub fn new(account_id: String, draft: OutgoingDraft) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            account_id,
+            draft,
+            retry_count: 0,
+            max_retries: 5,
+            next_retry_timestamp: Utc::now().timestamp(),
+            last_error: None,
+            created_at: Utc::now().timestamp(),
+        }
+    }
+
+    pub fn calculate_backoff_seconds(retry_count: u32) -> i64 {
+        match retry_count {
+            0 => 30,       // 30 seconds
+            1 => 60,       // 1 minute
+            2 => 120,      // 2 minutes
+            3 => 300,      // 5 minutes
+            4 => 900,      // 15 minutes
+            _ => 1800,     // 30 minutes max
+        }
+    }
+
+    pub fn is_due(&self) -> bool {
+        Utc::now().timestamp() >= self.next_retry_timestamp
+    }
+
+    pub fn can_retry(&self) -> bool {
+        self.retry_count < self.max_retries
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,7 +698,7 @@ pub struct AppBackup {
     pub settings: SettingsMetadata,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutgoingDraft {
     pub account_id: String,
     pub to: Vec<Recipient>,

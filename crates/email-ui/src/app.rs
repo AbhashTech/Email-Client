@@ -53,6 +53,7 @@ pub struct EmailApp {
     is_window_visible: bool,
     is_maximized: bool,
     last_scheduled_check: std::time::Instant,
+    last_outbox_check: std::time::Instant,
     show_scheduled_modal: bool,
 
     // Sub-views
@@ -106,6 +107,7 @@ impl EmailApp {
             is_window_visible: true,
             is_maximized: false,
             last_scheduled_check: std::time::Instant::now(),
+            last_outbox_check: std::time::Instant::now(),
             show_scheduled_modal: false,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
@@ -171,6 +173,42 @@ impl EmailApp {
         };
 
         match &self.selected_folder {
+            FolderSelection::UnifiedOutbox => {
+                if let Ok(items) = self.storage.get_all_outbox_items(None) {
+                    self.messages = items
+                        .into_iter()
+                        .map(|item| {
+                            let snippet = if let Some(ref err) = item.last_error {
+                                format!("⚠️ Retry {}/{} failed: {}", item.retry_count, item.max_retries, err)
+                            } else {
+                                format!("📤 Queued for delivery (Retry count: {})", item.retry_count)
+                            };
+                            MessageHeader {
+                                id: format!("outbox_{}", item.id),
+                                account_id: item.account_id,
+                                folder_id: "outbox".to_string(),
+                                uid: 0,
+                                message_id: None,
+                                in_reply_to: item.draft.in_reply_to,
+                                subject: format!("[Outbox] {}", item.draft.subject),
+                                from_name: Some("Outbox Auto-Retry".to_string()),
+                                from_address: "outbox@queue".to_string(),
+                                to_recipients: item.draft.to,
+                                cc_recipients: item.draft.cc,
+                                date_epoch: item.created_at,
+                                snippet,
+                                is_read: true,
+                                is_flagged: false,
+                                is_draft: true,
+                                is_deleted: false,
+                                body_fetched: true,
+                                size_bytes: item.draft.body_plain.len() as u64,
+                                snooze_until: None,
+                            }
+                        })
+                        .collect();
+                }
+            }
             FolderSelection::UnifiedSnoozed => {
                 if let Ok(msgs) = self.storage.get_snoozed_messages(None) {
                     self.messages = msgs;
@@ -302,6 +340,33 @@ impl EmailApp {
 
         self.check_scheduled_queue();
         self.check_snoozed_queue();
+        self.check_outbox_queue();
+    }
+
+    pub fn check_outbox_queue(&mut self) {
+        if self.last_outbox_check.elapsed() < std::time::Duration::from_secs(3) {
+            return;
+        }
+        self.last_outbox_check = std::time::Instant::now();
+
+        if let Ok(due_items) = self.storage.get_due_outbox_items() {
+            for item in due_items {
+                let acc_opt = self.accounts.iter().find(|a| a.id == item.account_id).cloned();
+                if let Some(acc) = acc_opt {
+                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
+                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                            draft: item.draft.clone(),
+                            password: pwd,
+                        });
+                        let _ = self.storage.delete_outbox_item(&item.id);
+                        self.status_toast = Some((
+                            format!("✓ Outbox Auto-Retry: Transmitting '{}'", item.draft.subject),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     pub fn check_snoozed_queue(&mut self) {
@@ -732,6 +797,15 @@ impl App for EmailApp {
                     let sched_text = format!("⏰ {} Scheduled", scheduled_count);
                     if ui.button(RichText::new(sched_text).size(12.5).color(AppTheme::ACCENT_PRIMARY)).on_hover_text("View scheduled outbox queue").clicked() {
                         self.show_scheduled_modal = true;
+                    }
+                }
+
+                let outbox_count = self.storage.get_all_outbox_items(None).unwrap_or_default().len();
+                if outbox_count > 0 {
+                    let outbox_text = format!("📤 {} Outbox", outbox_count);
+                    if ui.button(RichText::new(outbox_text).size(12.5).color(AppTheme::ACCENT_WARNING)).on_hover_text("View outbox auto-retry queue").clicked() {
+                        self.selected_folder = FolderSelection::UnifiedOutbox;
+                        self.reload_messages();
                     }
                 }
 

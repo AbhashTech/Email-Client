@@ -93,6 +93,14 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
+### 📤 Offline Outbox Auto-Retry Queue
+- **Resilient Offline Sending**: If network connectivity drops or SMTP transmission fails during immediate or scheduled dispatch, emails are automatically safely queued into the offline Outbox.
+- **Exponential Backoff Dispatcher**: Background worker periodically polls the queue and re-attempts delivery with increasing backoff intervals (`30s` -> `1m` -> `2m` -> `5m` -> `15m` -> `30m`).
+- **`📤 Outbox (Retry)` Smart View**: Dedicated mailbox in the sidebar and top toolbar badge showing queued items, retry counts, timestamps, and error diagnostics.
+- **Auto-Recovery on Reconnect**: Seamlessly transmits all pending messages as soon as internet connection is restored with zero data loss.
+
+---
+
 ### 🪟 Window Controls & System Tray Integration
 - **Window Titlebar Controls**: Minimize (`[-]`), Maximize/Restore (`[🗖]`), and Close (`[✕]`) buttons built directly into the top navigation bar.
 - **System Tray (StatusNotifierItem DBus)**:

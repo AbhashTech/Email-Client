@@ -1596,6 +1596,187 @@ impl Storage {
             .map_err(|e| EmailError::Database(e.to_string()))?;
         Ok(())
     }
+
+    // --- Outbox Auto-Retry Queue Management ---
+
+    pub fn save_outbox_item(&self, item: &email_core::models::OutboxItem) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let draft_json = serde_json::to_string(&item.draft)
+            .map_err(|e| EmailError::Database(format!("Draft JSON serialization failed: {}", e)))?;
+
+        conn.execute(
+            r#"
+            INSERT INTO outbox (id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+                retry_count = excluded.retry_count,
+                next_retry_timestamp = excluded.next_retry_timestamp,
+                last_error = excluded.last_error
+            "#,
+            params![
+                item.id,
+                item.account_id,
+                draft_json,
+                item.retry_count,
+                item.max_retries,
+                item.next_retry_timestamp,
+                item.last_error,
+                item.created_at,
+            ],
+        )
+        .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_due_outbox_items(&self) -> Result<Vec<email_core::models::OutboxItem>> {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at
+                 FROM outbox
+                 WHERE next_retry_timestamp <= ?1 AND retry_count < max_retries
+                 ORDER BY next_retry_timestamp ASC",
+            )
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![now], |row| {
+                let id: String = row.get(0)?;
+                let account_id: String = row.get(1)?;
+                let draft_json: String = row.get(2)?;
+                let retry_count: u32 = row.get(3)?;
+                let max_retries: u32 = row.get(4)?;
+                let next_retry_timestamp: i64 = row.get(5)?;
+                let last_error: Option<String> = row.get(6)?;
+                let created_at: i64 = row.get(7)?;
+                Ok((id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at))
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            let (id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at) =
+                r.map_err(|e| EmailError::Database(e.to_string()))?;
+            if let Ok(draft) = serde_json::from_str::<email_core::models::OutgoingDraft>(&draft_json) {
+                list.push(email_core::models::OutboxItem {
+                    id,
+                    account_id,
+                    draft,
+                    retry_count,
+                    max_retries,
+                    next_retry_timestamp,
+                    last_error,
+                    created_at,
+                });
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn get_all_outbox_items(&self, account_id: Option<&str>) -> Result<Vec<email_core::models::OutboxItem>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let sql = match account_id {
+            Some(_) => "SELECT id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at FROM outbox WHERE account_id = ?1 ORDER BY created_at DESC",
+            None => "SELECT id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at FROM outbox ORDER BY created_at DESC",
+        };
+
+        fn map_outbox_row(row: &rusqlite::Row) -> rusqlite::Result<(String, String, String, u32, u32, i64, Option<String>, i64)> {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+            ))
+        }
+
+        let mut stmt = conn.prepare(sql).map_err(|e| EmailError::Database(e.to_string()))?;
+        let rows = if let Some(aid) = account_id {
+            stmt.query_map(params![aid], map_outbox_row).map_err(|e| EmailError::Database(e.to_string()))?
+        } else {
+            stmt.query_map([], map_outbox_row).map_err(|e| EmailError::Database(e.to_string()))?
+        };
+
+        let mut list = Vec::new();
+        for r in rows {
+            let (id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at) =
+                r.map_err(|e| EmailError::Database(e.to_string()))?;
+            if let Ok(draft) = serde_json::from_str::<email_core::models::OutgoingDraft>(&draft_json) {
+                list.push(email_core::models::OutboxItem {
+                    id,
+                    account_id,
+                    draft,
+                    retry_count,
+                    max_retries,
+                    next_retry_timestamp,
+                    last_error,
+                    created_at,
+                });
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn delete_outbox_item(&self, id: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute("DELETE FROM outbox WHERE id = ?1", params![id])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn record_outbox_failure(&self, id: &str, error_msg: &str) -> Result<Option<email_core::models::OutboxItem>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at FROM outbox WHERE id = ?1")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let item = stmt.query_row(params![id], |row| {
+            let id: String = row.get(0)?;
+            let account_id: String = row.get(1)?;
+            let draft_json: String = row.get(2)?;
+            let retry_count: u32 = row.get(3)?;
+            let max_retries: u32 = row.get(4)?;
+            let next_retry_timestamp: i64 = row.get(5)?;
+            let last_error: Option<String> = row.get(6)?;
+            let created_at: i64 = row.get(7)?;
+            Ok((id, account_id, draft_json, retry_count, max_retries, next_retry_timestamp, last_error, created_at))
+        });
+
+        match item {
+            Ok((id, account_id, draft_json, retry_count, max_retries, _old_next_retry, _old_error, created_at)) => {
+                let new_retry_count = retry_count + 1;
+                let backoff_secs = email_core::models::OutboxItem::calculate_backoff_seconds(new_retry_count);
+                let next_retry_timestamp = chrono::Utc::now().timestamp() + backoff_secs;
+
+                conn.execute(
+                    "UPDATE outbox SET retry_count = ?1, next_retry_timestamp = ?2, last_error = ?3 WHERE id = ?4",
+                    params![new_retry_count, next_retry_timestamp, error_msg, id],
+                )
+                .map_err(|e| EmailError::Database(e.to_string()))?;
+
+                if let Ok(draft) = serde_json::from_str::<email_core::models::OutgoingDraft>(&draft_json) {
+                    Ok(Some(email_core::models::OutboxItem {
+                        id,
+                        account_id,
+                        draft,
+                        retry_count: new_retry_count,
+                        max_retries,
+                        next_retry_timestamp,
+                        last_error: Some(error_msg.to_string()),
+                        created_at,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(EmailError::Database(e.to_string())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2162,6 +2343,65 @@ mod tests {
         storage.delete_pgp_key("security@abhashtech.com").unwrap();
         let deleted = storage.get_pgp_key("security@abhashtech.com").unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[test]
+    fn test_outbox_queue_crud_and_retry_flow() {
+        let storage = Storage::new_in_memory().unwrap();
+
+        let account = Account::new(
+            "outbox_user".to_string(),
+            "outbox@example.com".to_string(),
+            "imap.example.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.example.com".to_string(),
+            587,
+            SecurityType::StartTls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let draft = OutgoingDraft {
+            account_id: account.id.clone(),
+            to: vec![Recipient::new(Some("Boss".to_string()), "boss@example.com".to_string())],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Urgent status report".to_string(),
+            body_plain: "Network is temporarily down, sending via retry queue.".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            references: None,
+        };
+
+        let mut item = OutboxItem::new(account.id.clone(), draft);
+        // Force timestamp in past so it's due immediately
+        item.next_retry_timestamp = chrono::Utc::now().timestamp() - 10;
+
+        // 1. Save outbox item
+        storage.save_outbox_item(&item).unwrap();
+
+        // 2. Query due items
+        let due = storage.get_due_outbox_items().unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, item.id);
+        assert_eq!(due[0].retry_count, 0);
+
+        // 3. Record failure with exponential backoff
+        let updated = storage.record_outbox_failure(&item.id, "SMTP connection timed out").unwrap().expect("Item exists");
+        assert_eq!(updated.retry_count, 1);
+        assert_eq!(updated.last_error.as_deref(), Some("SMTP connection timed out"));
+        assert!(updated.next_retry_timestamp > chrono::Utc::now().timestamp());
+
+        // 4. List all outbox items
+        let all = storage.get_all_outbox_items(None).unwrap();
+        assert_eq!(all.len(), 1);
+
+        // 5. Delete outbox item on successful delivery
+        storage.delete_outbox_item(&item.id).unwrap();
+        let all_after = storage.get_all_outbox_items(None).unwrap();
+        assert!(all_after.is_empty());
     }
 }
 

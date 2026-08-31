@@ -8,6 +8,7 @@ pub enum FolderSelection {
     UnifiedFlagged,
     UnifiedUnread,
     UnifiedSnoozed,
+    UnifiedOutbox,
     Folder { account_id: String, folder_id: String },
 }
 
@@ -105,6 +106,16 @@ impl SidebarView {
                         0,
                         matches!(selected, FolderSelection::UnifiedSnoozed),
                         || *selected = FolderSelection::UnifiedSnoozed,
+                        None::<fn(Vec<String>)>,
+                    );
+
+                    Self::render_folder_item(
+                        ui,
+                        "📤",
+                        "Outbox (Retry)",
+                        0,
+                        matches!(selected, FolderSelection::UnifiedOutbox),
+                        || *selected = FolderSelection::UnifiedOutbox,
                         None::<fn(Vec<String>)>,
                     );
 
