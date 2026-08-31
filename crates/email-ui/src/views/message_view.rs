@@ -95,7 +95,11 @@ impl MessageViewPane {
             ui.cursor().top(),
             Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
         );
-        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+        ui.add_space(12.0);
+
+        let wrap_width = ui.available_width().max(350.0);
+
+        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
             // 2. Email Subject Title
             let subj = if msg.subject.is_empty() {
                 "(No Subject)"
@@ -204,31 +208,36 @@ impl MessageViewPane {
                 return;
             }
 
-
             // 5. Message Body Content
             ui.scope(|ui| {
                 if let Some(ref html) = detail.body_html {
                     let blocks = parse_html_to_blocks(html);
                     if blocks.is_empty() {
                         if let Some(ref plain) = detail.body_plain {
-                            ui.label(RichText::new(plain).size(13.5).line_height(Some(20.0)));
+                            ui.scope(|ui| {
+                                ui.set_max_width(wrap_width);
+                                ui.label(RichText::new(plain).size(13.5).line_height(Some(20.0)));
+                            });
                         }
                     } else {
                         for block in blocks {
                             match block {
                                 HtmlBlock::Paragraph(spans) => {
-                                    render_spans(ui, &spans);
+                                    render_spans(ui, &spans, wrap_width);
                                     ui.add_space(8.0);
                                 }
                                 HtmlBlock::Heading { level: _, text } => {
                                     ui.add_space(4.0);
-                                    ui.heading(RichText::new(text).strong().color(AppTheme::TEXT_PRIMARY));
+                                    ui.scope(|ui| {
+                                        ui.set_max_width(wrap_width);
+                                        ui.heading(RichText::new(text).strong().color(AppTheme::TEXT_PRIMARY));
+                                    });
                                     ui.add_space(4.0);
                                 }
                                 HtmlBlock::ListItem(spans) => {
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new("•").size(14.0).color(AppTheme::ACCENT_PRIMARY));
-                                        render_spans(ui, &spans);
+                                        render_spans(ui, &spans, wrap_width - 20.0);
                                     });
                                     ui.add_space(4.0);
                                 }
@@ -435,42 +444,45 @@ impl MessageViewPane {
 }
 
 
-fn render_spans(ui: &mut Ui, spans: &[FormattedSpan]) {
-    ui.horizontal_wrapped(|ui| {
-        for span in spans {
-            let mut text = RichText::new(&span.text).size(13.5);
-            match span.style {
-                TextStyle::Normal => {
-                    text = text.color(AppTheme::TEXT_PRIMARY);
+fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32) {
+    ui.scope(|ui| {
+        ui.set_max_width(wrap_width);
+        ui.horizontal_wrapped(|ui| {
+            for span in spans {
+                let mut text = RichText::new(&span.text).size(13.5);
+                match span.style {
+                    TextStyle::Normal => {
+                        text = text.color(AppTheme::TEXT_PRIMARY);
+                    }
+                    TextStyle::Bold => {
+                        text = text.strong().color(AppTheme::TEXT_PRIMARY);
+                    }
+                    TextStyle::Italic => {
+                        text = text.italics().color(AppTheme::TEXT_SECONDARY);
+                    }
+                    TextStyle::BoldItalic => {
+                        text = text.strong().italics().color(AppTheme::TEXT_PRIMARY);
+                    }
+                    TextStyle::Code => {
+                        text = text.monospace().background_color(AppTheme::BG_CARD).color(Color32::from_rgb(255, 180, 100));
+                    }
+                    TextStyle::Heading1 => {
+                        text = text.size(18.0).strong().color(AppTheme::TEXT_PRIMARY);
+                    }
+                    TextStyle::Heading2 => {
+                        text = text.size(15.0).strong().color(AppTheme::TEXT_PRIMARY);
+                    }
+                    TextStyle::Heading3 => {
+                        text = text.size(14.0).strong().color(AppTheme::TEXT_PRIMARY);
+                    }
                 }
-                TextStyle::Bold => {
-                    text = text.strong().color(AppTheme::TEXT_PRIMARY);
-                }
-                TextStyle::Italic => {
-                    text = text.italics().color(AppTheme::TEXT_SECONDARY);
-                }
-                TextStyle::BoldItalic => {
-                    text = text.strong().italics().color(AppTheme::TEXT_PRIMARY);
-                }
-                TextStyle::Code => {
-                    text = text.monospace().background_color(AppTheme::BG_CARD).color(Color32::from_rgb(255, 180, 100));
-                }
-                TextStyle::Heading1 => {
-                    text = text.size(18.0).strong().color(AppTheme::TEXT_PRIMARY);
-                }
-                TextStyle::Heading2 => {
-                    text = text.size(15.0).strong().color(AppTheme::TEXT_PRIMARY);
-                }
-                TextStyle::Heading3 => {
-                    text = text.size(14.0).strong().color(AppTheme::TEXT_PRIMARY);
-                }
-            }
 
-            if let Some(ref url) = span.link_url {
-                ui.hyperlink_to(text.color(AppTheme::ACCENT_HOVER).underline(), url);
-            } else {
-                ui.label(text);
+                if let Some(ref url) = span.link_url {
+                    ui.hyperlink_to(text.color(AppTheme::ACCENT_HOVER).underline(), url);
+                } else {
+                    ui.label(text);
+                }
             }
-        }
+        });
     });
 }
