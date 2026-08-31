@@ -1070,13 +1070,13 @@ impl SettingsView {
 
                 ui.radio_value(
                     &mut cfg.close_action,
-                    CloseButtonAction::MinimizeToTray,
-                    "Minimize / Hide to System Tray (Keep running in background)",
+                    CloseButtonAction::QuitApplication,
+                    "Quit Application Completely (Recommended for Wayland & Tiling WMs)",
                 );
                 ui.radio_value(
                     &mut cfg.close_action,
-                    CloseButtonAction::QuitApplication,
-                    "Quit Application Completely",
+                    CloseButtonAction::MinimizeToTray,
+                    "Minimize / Hide to System Tray (Keep running in background)",
                 );
 
                 if cfg.close_action != prev_action {

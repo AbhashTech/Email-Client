@@ -111,7 +111,7 @@ pub enum CloseButtonAction {
 
 impl Default for CloseButtonAction {
     fn default() -> Self {
-        Self::MinimizeToTray
+        Self::QuitApplication
     }
 }
 
