@@ -118,6 +118,15 @@ CREATE TABLE IF NOT EXISTS scheduled_emails (
     created_at INTEGER NOT NULL
 );
 
+-- PGP End-to-End Encryption Keys
+CREATE TABLE IF NOT EXISTS pgp_keys (
+    email TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    public_key_armored TEXT NOT NULL,
+    private_key_armored TEXT,
+    created_at INTEGER NOT NULL
+);
+
 -- Indexes for lightning fast lookups
 CREATE INDEX IF NOT EXISTS idx_messages_folder_date ON messages(folder_id, date_epoch DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_account_unread ON messages(account_id, is_read);

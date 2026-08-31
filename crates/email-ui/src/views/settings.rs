@@ -20,6 +20,7 @@ pub enum SettingsTab {
     Signatures,
     Templates,
     Appearance,
+    SecurityPgp,
     General,
     Backup,
 }
@@ -62,6 +63,10 @@ pub struct SettingsView {
     pub active_custom_theme_id: Option<String>,
     pub custom_themes: Vec<CustomTheme>,
 
+    // PGP Key Manager
+    pub pgp_import_email: String,
+    pub pgp_import_armored_key: String,
+
     // Feedback message
     pub status_msg: Option<(bool, String)>,
 }
@@ -99,6 +104,8 @@ impl SettingsView {
             new_theme_text_secondary: [213, 196, 161],
             active_custom_theme_id: None,
             custom_themes: Vec::new(),
+            pgp_import_email: String::new(),
+            pgp_import_armored_key: String::new(),
             status_msg: None,
         }
     }
@@ -168,6 +175,7 @@ impl SettingsView {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Signatures, "📝 Signatures");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Templates, "📋 Templates & Snippets");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Appearance, "🎨 Appearance");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::SecurityPgp, "🔒 Security (PGP)");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Backup, "💾 Backup & Restore");
                 });
@@ -213,6 +221,9 @@ impl SettingsView {
                         }
                         SettingsTab::Appearance => {
                             self.show_appearance_tab(ui, ctx, current_theme);
+                        }
+                        SettingsTab::SecurityPgp => {
+                            self.show_security_pgp_tab(ui, accounts, storage);
                         }
                         SettingsTab::General => {
                             self.show_general_tab(ui, accounts, storage);
@@ -1242,6 +1253,198 @@ impl SettingsView {
                 }
             }
         });
+    }
+
+    fn show_security_pgp_tab(
+        &mut self,
+        ui: &mut Ui,
+        accounts: &[Account],
+        storage: &Storage,
+    ) {
+        ui.heading(RichText::new("🔒 End-to-End Encryption (PGP / OpenPGP)").size(16.0));
+        ui.label(
+            RichText::new(
+                "Generate RSA-2048/AES-256 PGP keypairs for your accounts, manage public keys, and encrypt messages with military-grade privacy.",
+            )
+            .size(12.5)
+            .color(AppTheme::TEXT_SECONDARY),
+        );
+        ui.add_space(14.0);
+
+        // Section 1: My Keypairs
+        ui.label(RichText::new("🔑 My Account Keypairs").size(14.0).strong());
+        ui.add_space(6.0);
+
+        if accounts.is_empty() {
+            ui.label(RichText::new("No email accounts configured yet.").italics().color(AppTheme::TEXT_MUTED));
+        } else {
+            for acc in accounts {
+                let existing_key = storage.get_pgp_key(&acc.email).ok().flatten();
+
+                egui::Frame::none()
+                    .fill(AppTheme::BG_CARD)
+                    .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(egui::Margin::symmetric(14.0, 12.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&acc.email).strong().size(13.5).color(AppTheme::TEXT_PRIMARY));
+                                if let Some(ref kp) = existing_key {
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new(format!("Fingerprint: {}", kp.fingerprint)).monospace().size(11.0).color(AppTheme::TEXT_MUTED));
+                                } else {
+                                    ui.label(RichText::new("No PGP keypair generated for this account").italics().size(11.5).color(AppTheme::TEXT_MUTED));
+                                }
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if let Some(ref kp) = existing_key {
+                                    let email_clone = acc.email.clone();
+                                    if ui.button(RichText::new("🗑 Delete").color(AppTheme::ACCENT_DANGER).size(12.0)).clicked() {
+                                        let _ = storage.delete_pgp_key(&email_clone);
+                                        self.status_msg = Some((true, format!("Deleted PGP key for {}", email_clone)));
+                                    }
+
+                                    let pubkey_str = kp.public_key_armored.clone();
+                                    if ui.button(RichText::new("📋 Copy Public Key").size(12.0)).clicked() {
+                                        ui.output_mut(|o| o.copied_text = pubkey_str);
+                                        self.status_msg = Some((true, "Copied public key to clipboard".to_string()));
+                                    }
+
+                                    let pubkey_export = kp.public_key_armored.clone();
+                                    let filename = format!("{}_pubkey.asc", acc.email);
+                                    if ui.button(RichText::new("💾 Export (.asc)").size(12.0)).clicked() {
+                                        std::thread::spawn(move || {
+                                            let dialog = rfd::FileDialog::new()
+                                                .set_file_name(&filename)
+                                                .set_title("Export Armored PGP Public Key");
+                                            if let Some(path) = dialog.save_file() {
+                                                let _ = std::fs::write(path, pubkey_export);
+                                            }
+                                        });
+                                        self.status_msg = Some((true, "Exporting public key...".to_string()));
+                                    }
+                                } else {
+                                    let email_clone = acc.email.clone();
+                                    let gen_btn = egui::Button::new(RichText::new("✨ Generate Keypair").strong().color(Color32::WHITE).size(12.0))
+                                        .fill(AppTheme::ACCENT_PRIMARY);
+                                    if ui.add(gen_btn).clicked() {
+                                        match email_core::pgp::generate_pgp_keypair(&email_clone) {
+                                            Ok(new_kp) => {
+                                                let _ = storage.save_pgp_keypair(&new_kp);
+                                                self.status_msg = Some((true, format!("Generated 2048-bit PGP keypair for {}", email_clone)));
+                                            }
+                                            Err(e) => {
+                                                self.status_msg = Some((false, format!("Failed to generate keypair: {}", e)));
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(8.0);
+            }
+        }
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(12.0);
+
+        // Section 2: Recipient Public Keys
+        ui.label(RichText::new("👥 Recipient Public Keys (Address Book)").size(14.0).strong());
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Import public keys for contacts you wish to send encrypted emails to.")
+                .size(12.0)
+                .color(AppTheme::TEXT_MUTED),
+        );
+        ui.add_space(8.0);
+
+        // Import Box
+        egui::Frame::none()
+            .fill(AppTheme::BG_CARD)
+            .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 12.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Contact Email:").size(12.5));
+                    ui.add(egui::TextEdit::singleline(&mut self.pgp_import_email).hint_text("colleague@company.com").desired_width(260.0));
+                });
+                ui.add_space(6.0);
+                ui.label(RichText::new("Armored Public Key (-----BEGIN PGP PUBLIC KEY BLOCK-----):").size(12.0).color(AppTheme::TEXT_MUTED));
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.pgp_import_armored_key)
+                        .hint_text("Paste armored public key block here...")
+                        .desired_rows(4)
+                        .desired_width(f32::INFINITY)
+                        .font(egui::TextStyle::Monospace),
+                );
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    let import_btn = egui::Button::new(RichText::new("📥 Import Public Key").strong().color(Color32::WHITE).size(12.0))
+                        .fill(AppTheme::ACCENT_SUCCESS);
+                    if ui.add(import_btn).clicked() {
+                        let email = self.pgp_import_email.trim().to_string();
+                        let key_text = self.pgp_import_armored_key.trim().to_string();
+
+                        if email.is_empty() || key_text.is_empty() {
+                            self.status_msg = Some((false, "Email and Armored Key are required.".to_string()));
+                        } else if !key_text.contains(email_core::pgp::PGP_PUBKEY_HEADER) {
+                            self.status_msg = Some((false, "Invalid key: missing -----BEGIN PGP PUBLIC KEY BLOCK----- header.".to_string()));
+                        } else {
+                            let kp = email_core::pgp::PgpKeypair {
+                                email: email.clone(),
+                                fingerprint: "IMPORTED KEY".to_string(),
+                                public_key_armored: key_text,
+                                private_key_armored: String::new(),
+                                created_at: chrono::Utc::now().timestamp(),
+                            };
+                            let _ = storage.save_pgp_keypair(&kp);
+                            self.pgp_import_email.clear();
+                            self.pgp_import_armored_key.clear();
+                            self.status_msg = Some((true, format!("Successfully imported public key for {}", email)));
+                        }
+                    }
+
+                    if ui.button(RichText::new("📂 Import from .asc File").size(12.0)).clicked() {
+                        let dialog = rfd::FileDialog::new()
+                            .add_filter("Armored Key", &["asc", "pub", "key", "txt"])
+                            .set_title("Select PGP Public Key File");
+                        if let Some(path) = dialog.pick_file() {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                self.pgp_import_armored_key = content;
+                            }
+                        }
+                    }
+                });
+            });
+
+        ui.add_space(14.0);
+
+        // List all stored keys
+        if let Ok(all_keys) = storage.get_all_pgp_keys() {
+            let recipients_only: Vec<_> = all_keys.into_iter().filter(|k| k.private_key_armored.is_empty()).collect();
+            if !recipients_only.is_empty() {
+                ui.label(RichText::new(format!("Imported Contact Keys ({})", recipients_only.len())).size(13.0).strong());
+                ui.add_space(4.0);
+                for k in recipients_only {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("👤").size(13.0));
+                        ui.label(RichText::new(&k.email).strong().size(12.5));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let email_del = k.email.clone();
+                            if ui.small_button(RichText::new("🗑 Delete").color(AppTheme::ACCENT_DANGER)).clicked() {
+                                let _ = storage.delete_pgp_key(&email_del);
+                            }
+                        });
+                    });
+                }
+            }
+        }
     }
 }
 

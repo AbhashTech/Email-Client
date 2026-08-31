@@ -73,6 +73,15 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
+### 🔒 End-to-End Encryption & Cryptographic Signatures (PGP / OpenPGP)
+- **RSA-2048 & AES-256-GCM Cryptography**: Complete zero-knowledge cryptographic pipeline for message privacy and authenticity.
+- **Armored Keypair Generator & Keychain**: Generate 2048-bit PGP keypairs directly within Preferences with SHA-256 fingerprinting, clipboard export, and `.asc` export.
+- **Recipient Public Key Address Book**: Import and manage contact public keys with instant validation and SQLite persistence.
+- **One-Click Composer Toggles**: `[🔒 Encrypt (PGP)]` and `[✍ Sign (PGP)]` checkboxes in composer toolbar for seamless message encryption and RSA cleartext signing.
+- **Automatic Security Badges & Decryption**: Incoming PGP messages and signatures display dedicated security alert banners in the reading pane with automatic key resolution and integrity verification.
+
+---
+
 ### 📝 Composer, Drafts, Scheduled Send & Undo Send
 - **💾 Save as Draft (`💾 Save Draft`)**: Persist in-progress emails (recipients, format, subject, body, signature) to local SQLite storage. Re-open and edit drafts directly from the reading pane (`[✏ Edit Draft]`).
 - **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.

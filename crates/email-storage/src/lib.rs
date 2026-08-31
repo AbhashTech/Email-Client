@@ -1509,6 +1509,87 @@ impl Storage {
         Ok(list)
     }
 
+    // --- PGP Key Management ---
+
+    pub fn save_pgp_keypair(&self, keypair: &email_core::pgp::PgpKeypair) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO pgp_keys (email, fingerprint, public_key_armored, private_key_armored, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(email) DO UPDATE SET
+                fingerprint = excluded.fingerprint,
+                public_key_armored = excluded.public_key_armored,
+                private_key_armored = excluded.private_key_armored,
+                created_at = excluded.created_at
+            "#,
+            params![
+                keypair.email,
+                keypair.fingerprint,
+                keypair.public_key_armored,
+                keypair.private_key_armored,
+                keypair.created_at,
+            ],
+        )
+        .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_pgp_key(&self, email: &str) -> Result<Option<email_core::pgp::PgpKeypair>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT email, fingerprint, public_key_armored, private_key_armored, created_at FROM pgp_keys WHERE email = ?1")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let result = stmt.query_row(params![email], |row| {
+            Ok(email_core::pgp::PgpKeypair {
+                email: row.get(0)?,
+                fingerprint: row.get(1)?,
+                public_key_armored: row.get(2)?,
+                private_key_armored: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        });
+
+        match result {
+            Ok(kp) => Ok(Some(kp)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(EmailError::Database(e.to_string())),
+        }
+    }
+
+    pub fn get_all_pgp_keys(&self) -> Result<Vec<email_core::pgp::PgpKeypair>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT email, fingerprint, public_key_armored, private_key_armored, created_at FROM pgp_keys ORDER BY email ASC")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(email_core::pgp::PgpKeypair {
+                    email: row.get(0)?,
+                    fingerprint: row.get(1)?,
+                    public_key_armored: row.get(2)?,
+                    private_key_armored: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| EmailError::Database(e.to_string()))?);
+        }
+        Ok(list)
+    }
+
+    pub fn delete_pgp_key(&self, email: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute("DELETE FROM pgp_keys WHERE email = ?1", params![email])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn delete_scheduled_email(&self, id: &str) -> Result<()> {
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
         conn.execute("DELETE FROM scheduled_emails WHERE id = ?1", params![id])
@@ -2057,6 +2138,30 @@ mod tests {
         assert_eq!(thread.messages.len(), 2);
         assert_eq!(thread.messages[0].header.id, "thread_msg_1");
         assert_eq!(thread.messages[1].header.id, "thread_msg_2");
+    }
+
+    #[test]
+    fn test_pgp_key_storage_crud() {
+        let storage = Storage::new_in_memory().unwrap();
+        let kp = email_core::pgp::generate_pgp_keypair("security@abhashtech.com").unwrap();
+
+        // 1. Save Keypair
+        storage.save_pgp_keypair(&kp).unwrap();
+
+        // 2. Query Key
+        let fetched = storage.get_pgp_key("security@abhashtech.com").unwrap().expect("Key found");
+        assert_eq!(fetched.email, "security@abhashtech.com");
+        assert_eq!(fetched.fingerprint, kp.fingerprint);
+        assert_eq!(fetched.public_key_armored, kp.public_key_armored);
+
+        // 3. List All Keys
+        let all_keys = storage.get_all_pgp_keys().unwrap();
+        assert_eq!(all_keys.len(), 1);
+
+        // 4. Delete Key
+        storage.delete_pgp_key("security@abhashtech.com").unwrap();
+        let deleted = storage.get_pgp_key("security@abhashtech.com").unwrap();
+        assert!(deleted.is_none());
     }
 }
 

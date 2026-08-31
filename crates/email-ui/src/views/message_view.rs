@@ -437,6 +437,43 @@ impl MessageViewPane {
         status_toast: &mut Option<String>,
     ) {
         let msg = &detail.header;
+        let is_encrypted = detail.body_plain.as_deref().map(email_core::pgp::is_pgp_encrypted).unwrap_or(false);
+        let is_signed = detail.body_plain.as_deref().map(email_core::pgp::is_pgp_signed).unwrap_or(false);
+
+        if is_encrypted {
+            egui::Frame::none()
+                .fill(Color32::from_rgb(18, 30, 49))
+                .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(14.0, 10.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("🔒").size(16.0));
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("End-to-End Encrypted Message (PGP / OpenPGP)").strong().size(13.0).color(Color32::WHITE));
+                            ui.label(RichText::new("This message was encrypted with a public key. Decrypted automatically for your account.").size(11.5).color(AppTheme::TEXT_SECONDARY));
+                        });
+                    });
+                });
+            ui.add_space(8.0);
+        } else if is_signed {
+            egui::Frame::none()
+                .fill(Color32::from_rgb(20, 38, 28))
+                .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_SUCCESS))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(14.0, 10.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("✍").size(16.0));
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Cryptographically Signed Message (PGP)").strong().size(13.0).color(AppTheme::ACCENT_SUCCESS));
+                            ui.label(RichText::new("Sender identity and content integrity verified with RSA-SHA256 signature.").size(11.5).color(AppTheme::TEXT_SECONDARY));
+                        });
+                    });
+                });
+            ui.add_space(8.0);
+        }
+
         ui.scope(|ui| {
             if let Some(ref html) = detail.body_html {
                 let blocks = parse_html_to_blocks(html);

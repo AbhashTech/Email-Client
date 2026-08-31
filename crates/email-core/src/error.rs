@@ -35,6 +35,9 @@ pub enum EmailError {
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    #[error("Encryption error: {0}")]
+    Encryption(String),
+
     #[error("Operation cancelled")]
     Cancelled,
 }

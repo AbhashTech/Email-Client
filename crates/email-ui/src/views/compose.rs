@@ -35,6 +35,8 @@ pub struct ComposeView {
     pub show_custom_schedule_dialog: bool,
     pub custom_schedule_hours: u32,
     pub custom_schedule_mins: u32,
+    pub enable_pgp_encryption: bool,
+    pub enable_pgp_signing: bool,
 }
 
 fn find_default_signature<'a>(signatures: &'a [Signature], account_id: Option<&str>) -> Option<&'a Signature> {
@@ -85,6 +87,8 @@ impl ComposeView {
             show_custom_schedule_dialog: false,
             custom_schedule_hours: 1,
             custom_schedule_mins: 0,
+            enable_pgp_encryption: false,
+            enable_pgp_signing: false,
         }
     }
 
@@ -382,6 +386,13 @@ impl ComposeView {
                                     }
                                 }
                             });
+
+                        // PGP Toggles
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut self.enable_pgp_encryption, RichText::new("🔒 Encrypt (PGP)").size(11.5))
+                            .on_hover_text("Encrypt email body with recipient's public key (OpenPGP)");
+                        ui.checkbox(&mut self.enable_pgp_signing, RichText::new("✍ Sign (PGP)").size(11.5))
+                            .on_hover_text("Sign email body with your account's private key (OpenPGP)");
                     });
                 });
 
@@ -442,7 +453,12 @@ impl ComposeView {
         self.is_open = self.is_open && is_open;
     }
 
-    fn build_outgoing_draft(&self, signatures: &[Signature]) -> Result<OutgoingDraft, String> {
+    fn build_outgoing_draft(
+        &self,
+        signatures: &[Signature],
+        accounts: &[Account],
+        storage: &Storage,
+    ) -> Result<OutgoingDraft, String> {
         if self.to_input.trim().is_empty() {
             return Err("Please specify at least one recipient email address.".to_string());
         }
@@ -525,14 +541,51 @@ impl ComposeView {
             }
         };
 
+        let mut final_plain = body_plain;
+        let mut final_html = body_html;
+        let mut final_subject = self.subject.clone();
+
+        if self.enable_pgp_encryption {
+            let first_to = to_list.first().map(|r| r.email.clone()).unwrap_or_default();
+            let mut recipient_key = storage.get_pgp_key(&first_to).ok().flatten();
+            if recipient_key.is_none() {
+                if let Some(acc) = accounts.iter().find(|a| a.id == self.selected_account_id) {
+                    recipient_key = storage.get_pgp_key(&acc.email).ok().flatten();
+                }
+            }
+
+            if let Some(key) = recipient_key {
+                let encrypted = email_core::pgp::pgp_encrypt(&final_plain, &key.public_key_armored)
+                    .map_err(|e| format!("PGP encryption failed: {}", e))?;
+                final_plain = encrypted;
+                final_html = None;
+                if !final_subject.to_lowercase().contains("encrypted") {
+                    final_subject = format!("[PGP Encrypted] {}", final_subject);
+                }
+            } else {
+                return Err(format!("No PGP public key found for recipient '{}'. Please import their public key in Settings -> Security (PGP).", first_to));
+            }
+        } else if self.enable_pgp_signing {
+            let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
+            if let Some(acc) = current_account {
+                if let Some(key) = storage.get_pgp_key(&acc.email).ok().flatten() {
+                    if !key.private_key_armored.is_empty() {
+                        let signed = email_core::pgp::pgp_sign(&final_plain, &key.private_key_armored)
+                            .map_err(|e| format!("PGP signing failed: {}", e))?;
+                        final_plain = signed;
+                    }
+                }
+            }
+        }
+
         Ok(OutgoingDraft {
             account_id: self.selected_account_id.clone(),
             to: to_list,
             cc: cc_list,
             bcc: bcc_list,
-            subject: self.subject.clone(),
-            body_plain,
-            body_html,
+            subject: final_subject,
+            body_plain: final_plain,
+            body_html: final_html,
             in_reply_to: self.in_reply_to.clone(),
             references: self.references.clone(),
         })
@@ -546,7 +599,7 @@ impl ComposeView {
         on_schedule_send: &mut Option<(OutgoingDraft, String)>,
         storage: &Storage,
     ) -> bool {
-        match self.build_outgoing_draft(signatures) {
+        match self.build_outgoing_draft(signatures, accounts, storage) {
             Ok(draft) => {
                 let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
                 if let Some(acc) = current_account {
@@ -584,7 +637,7 @@ impl ComposeView {
         storage: &Storage,
         target_timestamp: i64,
     ) -> bool {
-        match self.build_outgoing_draft(signatures) {
+        match self.build_outgoing_draft(signatures, accounts, storage) {
             Ok(draft) => {
                 let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
                 if let Some(acc) = current_account {
