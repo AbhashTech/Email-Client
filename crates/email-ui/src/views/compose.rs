@@ -134,7 +134,7 @@ impl ComposeView {
             .collapsible(false)
             .resizable(true)
             .default_width(680.0)
-            .default_height(540.0)
+            .default_height(480.0)
             .show(ctx, |ui| {
                 if accounts.is_empty() {
                     ui.label("No email accounts configured. Please add an account first.");
@@ -148,9 +148,30 @@ impl ComposeView {
                     }
                 }
 
-                // 1. Account Selector & Quick Snippets Toolbar
+                // 1. Top Action Toolbar (Send, From account, Templates, Signatures, Discard)
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("From:").size(12.5).color(AppTheme::TEXT_MUTED));
+                    let send_btn_label = if self.send_as_html {
+                        "🚀 Send"
+                    } else {
+                        "🚀 Send (Text)"
+                    };
+
+                    let top_send_btn = egui::Button::new(
+                        RichText::new(send_btn_label)
+                            .size(12.5)
+                            .strong()
+                            .color(Color32::WHITE),
+                    )
+                    .fill(AppTheme::ACCENT_PRIMARY)
+                    .rounding(Rounding::same(6.0));
+
+                    if ui.add(top_send_btn).clicked() {
+                        self.execute_send(accounts, signatures, cmd_tx, keyring);
+                    }
+
+                    ui.add_space(4.0);
+
+                    ui.label(RichText::new("From:").size(12.0).color(AppTheme::TEXT_MUTED));
                     let current_account = accounts.iter().find(|a| a.id == self.selected_account_id).unwrap_or(&accounts[0]);
                     let prev_account_id = self.selected_account_id.clone();
 
@@ -171,6 +192,10 @@ impl ComposeView {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new("Discard").size(11.5)).clicked() {
+                            self.is_open = false;
+                        }
+
                         // Templates picker
                         if !templates.is_empty() {
                             egui::ComboBox::from_id_salt("template_picker_combo")
@@ -290,12 +315,11 @@ impl ComposeView {
                 ui.separator();
                 ui.add_space(2.0);
 
-                // 5. Docked Bottom Action Bar & Resizable Editor Body
-                // Using bottom_up layout guarantees the Send button is always pinned & visible
+                // 5. Body Text Editor & Bottom Status Bar
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(4.0);
 
-                    // Send / Discard Action Bar
+                    // Bottom Action Bar
                     ui.horizontal(|ui| {
                         let send_btn_label = if self.send_as_html {
                             "🚀 Send (HTML)"
@@ -303,7 +327,7 @@ impl ComposeView {
                             "🚀 Send (Plain Text)"
                         };
 
-                        let send_btn = egui::Button::new(
+                        let bottom_send_btn = egui::Button::new(
                             RichText::new(send_btn_label)
                                 .size(13.0)
                                 .strong()
@@ -312,101 +336,8 @@ impl ComposeView {
                         .fill(AppTheme::ACCENT_PRIMARY)
                         .rounding(Rounding::same(6.0));
 
-                        if ui.add(send_btn).clicked() {
-                            if self.to_input.trim().is_empty() {
-                                self.error_msg = Some("Please specify at least one recipient email address.".to_string());
-                            } else {
-                                let to_list: Vec<Recipient> = self
-                                    .to_input
-                                    .split(',')
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                    .map(|email| Recipient::new(None, email.to_string()))
-                                    .collect();
-
-                                let cc_list: Vec<Recipient> = self
-                                    .cc_input
-                                    .split(',')
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                    .map(|email| Recipient::new(None, email.to_string()))
-                                    .collect();
-
-                                let bcc_list: Vec<Recipient> = self
-                                    .bcc_input
-                                    .split(',')
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                    .map(|email| Recipient::new(None, email.to_string()))
-                                    .collect();
-
-                                // Build signature parts
-                                let attached_sig = self.selected_signature_id.as_ref().and_then(|id| {
-                                    signatures.iter().find(|s| &s.id == id)
-                                });
-
-                                let (sig_plain, sig_html) = if let Some(sig) = attached_sig {
-                                    let clean_html = email_html::sanitize_raw_html(&sig.content_html);
-                                    let plain = email_html::html_to_plain_text(&sig.content_html);
-                                    (format!("\n\n--\n{}", plain), format!("<br/><br/>--<br/>{}", clean_html))
-                                } else {
-                                    (String::new(), String::new())
-                                };
-
-                                // Build quote parts
-                                let (quote_plain, quote_html) = if let Some(ref quote) = self.reply_quote {
-                                    (
-                                        format!("\n\n---\nOn previous discussion, wrote:\n{}", quote),
-                                        format!("<br/><br/>---<br/>On previous discussion, wrote:<br/>{}", quote.replace('\n', "<br/>"))
-                                    )
-                                } else {
-                                    (String::new(), String::new())
-                                };
-
-                                let (body_plain, body_html) = if self.send_as_html {
-                                    let user_plain = email_html::html_to_plain_text(&self.body_plain);
-                                    let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-                                    let html = format!(
-                                        "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
-                                        self.body_plain.replace('\n', "<br/>"),
-                                        sig_html,
-                                        quote_html
-                                    );
-                                    (plain, Some(html))
-                                } else {
-                                    let user_plain = email_html::html_to_plain_text(&self.body_plain);
-                                    let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
-                                    (plain, None)
-                                };
-
-                                let draft = OutgoingDraft {
-                                    account_id: self.selected_account_id.clone(),
-                                    to: to_list,
-                                    cc: cc_list,
-                                    bcc: bcc_list,
-                                    subject: self.subject.clone(),
-                                    body_plain,
-                                    body_html,
-                                    in_reply_to: self.in_reply_to.clone(),
-                                    references: self.references.clone(),
-                                };
-
-                                let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
-                                if let Some(acc) = current_account {
-                                    match keyring.get_credential(&acc.credential_key) {
-                                        Ok(pwd) => {
-                                            let _ = cmd_tx.send(SyncCommand::SendEmail {
-                                                draft,
-                                                password: pwd,
-                                            });
-                                            self.is_open = false;
-                                        }
-                                        Err(e) => {
-                                            self.error_msg = Some(format!("Could not retrieve account credentials from OS Keyring: {}", e));
-                                        }
-                                    }
-                                }
-                            }
+                        if ui.add(bottom_send_btn).clicked() {
+                            self.execute_send(accounts, signatures, cmd_tx, keyring);
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -449,7 +380,7 @@ impl ComposeView {
                     ui.add_space(4.0);
                     ui.separator();
 
-                    // Main Multiline Body Editor (fills all remaining available height)
+                    // Main Multiline Body Editor (fills remaining height between toolbar and bottom bar)
                     ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                         let avail_size = ui.available_size();
                         ui.add_sized(
@@ -463,6 +394,110 @@ impl ComposeView {
             });
 
         self.is_open = self.is_open && is_open;
+    }
+
+    fn execute_send(
+        &mut self,
+        accounts: &[Account],
+        signatures: &[Signature],
+        cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
+        keyring: &Arc<dyn CredentialStore>,
+    ) {
+        if self.to_input.trim().is_empty() {
+            self.error_msg = Some("Please specify at least one recipient email address.".to_string());
+            return;
+        }
+
+        let to_list: Vec<Recipient> = self
+            .to_input
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|email| Recipient::new(None, email.to_string()))
+            .collect();
+
+        let cc_list: Vec<Recipient> = self
+            .cc_input
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|email| Recipient::new(None, email.to_string()))
+            .collect();
+
+        let bcc_list: Vec<Recipient> = self
+            .bcc_input
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|email| Recipient::new(None, email.to_string()))
+            .collect();
+
+        // Build signature parts
+        let attached_sig = self.selected_signature_id.as_ref().and_then(|id| {
+            signatures.iter().find(|s| &s.id == id)
+        });
+
+        let (sig_plain, sig_html) = if let Some(sig) = attached_sig {
+            let clean_html = email_html::sanitize_raw_html(&sig.content_html);
+            let plain = email_html::html_to_plain_text(&sig.content_html);
+            (format!("\n\n--\n{}", plain), format!("<br/><br/>--<br/>{}", clean_html))
+        } else {
+            (String::new(), String::new())
+        };
+
+        // Build quote parts
+        let (quote_plain, quote_html) = if let Some(ref quote) = self.reply_quote {
+            (
+                format!("\n\n---\nOn previous discussion, wrote:\n{}", quote),
+                format!("<br/><br/>---<br/>On previous discussion, wrote:<br/>{}", quote.replace('\n', "<br/>"))
+            )
+        } else {
+            (String::new(), String::new())
+        };
+
+        let (body_plain, body_html) = if self.send_as_html {
+            let user_plain = email_html::html_to_plain_text(&self.body_plain);
+            let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+            let html = format!(
+                "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #222222;\">{}{}{}</div>",
+                self.body_plain.replace('\n', "<br/>"),
+                sig_html,
+                quote_html
+            );
+            (plain, Some(html))
+        } else {
+            let user_plain = email_html::html_to_plain_text(&self.body_plain);
+            let plain = format!("{}{}{}", user_plain, sig_plain, quote_plain);
+            (plain, None)
+        };
+
+        let draft = OutgoingDraft {
+            account_id: self.selected_account_id.clone(),
+            to: to_list,
+            cc: cc_list,
+            bcc: bcc_list,
+            subject: self.subject.clone(),
+            body_plain,
+            body_html,
+            in_reply_to: self.in_reply_to.clone(),
+            references: self.references.clone(),
+        };
+
+        let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
+        if let Some(acc) = current_account {
+            match keyring.get_credential(&acc.credential_key) {
+                Ok(pwd) => {
+                    let _ = cmd_tx.send(SyncCommand::SendEmail {
+                        draft,
+                        password: pwd,
+                    });
+                    self.is_open = false;
+                }
+                Err(e) => {
+                    self.error_msg = Some(format!("Could not retrieve account credentials from OS Keyring: {}", e));
+                }
+            }
+        }
     }
 }
 
