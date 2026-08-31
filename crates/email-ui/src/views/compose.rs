@@ -315,8 +315,10 @@ impl ComposeView {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // 1. Top Action Toolbar
+                        // 1. Primary Action Toolbar (Row 1)
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+
                             let send_btn_label = if self.send_as_html { "🚀 Send" } else { "🚀 Send (Text)" };
 
                             let top_send_btn = egui::Button::new(
@@ -384,8 +386,35 @@ impl ComposeView {
                                 }
                             }
 
-                            ui.add_space(4.0);
-                            ui.label(RichText::new("From:").size(12.0).color(AppTheme::TEXT_MUTED));
+                            // Templates picker
+                            if !templates.is_empty() {
+                                egui::ComboBox::from_id_salt("compose_template_picker")
+                                    .selected_text("📋 Template")
+                                    .show_ui(ui, |ui| {
+                                        for t in templates {
+                                            if ui.button(&t.name).clicked() {
+                                                if self.subject.is_empty() && !t.subject_template.is_empty() {
+                                                    self.subject = t.subject_template.clone();
+                                                }
+                                                self.body_plain.push_str(&t.body_template);
+                                            }
+                                        }
+                                    });
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(RichText::new("Discard").size(11.5)).clicked() {
+                                    self.is_open = false;
+                                }
+                            });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // 2. Account & Security Options (Row 2)
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+                            ui.label(RichText::new("From:").size(12.0).strong().color(AppTheme::TEXT_MUTED));
                             let current_account = accounts.iter().find(|a| a.id == self.selected_account_id).unwrap_or(&accounts[0]);
                             let prev_account_id = self.selected_account_id.clone();
                             egui::ComboBox::from_id_salt("compose_from_combo")
@@ -399,33 +428,13 @@ impl ComposeView {
                             if self.selected_account_id != prev_account_id {
                                 self.selected_signature_id = find_default_signature(signatures, Some(&self.selected_account_id)).map(|s| s.id.clone());
                             }
+
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button(RichText::new("Discard").size(11.5)).clicked() {
-                                    self.is_open = false;
-                                }
-
-                                // Templates picker
-                                if !templates.is_empty() {
-                                    egui::ComboBox::from_id_salt("compose_template_picker")
-                                        .selected_text("📋 Template")
-                                        .show_ui(ui, |ui| {
-                                            for t in templates {
-                                                if ui.button(&t.name).clicked() {
-                                                    if self.subject.is_empty() && !t.subject_template.is_empty() {
-                                                        self.subject = t.subject_template.clone();
-                                                    }
-                                                    self.body_plain.push_str(&t.body_template);
-                                                }
-                                            }
-                                        });
-                                }
-
-                                // PGP Toggles
+                                ui.checkbox(&mut self.enable_pgp_signing, RichText::new("✍ Sign (PGP)").size(11.5))
+                                    .on_hover_text("Sign email body with your account's private key (OpenPGP)");
                                 ui.add_space(4.0);
                                 ui.checkbox(&mut self.enable_pgp_encryption, RichText::new("🔒 Encrypt (PGP)").size(11.5))
                                     .on_hover_text("Encrypt email body with recipient's public key (OpenPGP)");
-                                ui.checkbox(&mut self.enable_pgp_signing, RichText::new("✍ Sign (PGP)").size(11.5))
-                                    .on_hover_text("Sign email body with your account's private key (OpenPGP)");
                             });
                         });
 
@@ -460,7 +469,7 @@ impl ComposeView {
                         ui.separator();
                         ui.add_space(4.0);
 
-                        // 2. To, Cc, Bcc
+                        // 3. To, Cc, Bcc
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("To:").size(12.5).color(AppTheme::TEXT_MUTED));
                             ui.add(egui::TextEdit::singleline(&mut self.to_input).desired_width(ui.available_width() - 80.0));
@@ -494,7 +503,7 @@ impl ComposeView {
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new(format!("📄 {} ({})", att.filename, size_str)).size(11.5));
-                                                if ui.small_button(RichText::new("✕").size(10.0).color(AppTheme::ACCENT_DANGER)).clicked() {
+                                                if ui.small_button(RichText::new("×").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
                                                     to_remove = Some(idx);
                                                 }
                                             });
@@ -510,7 +519,7 @@ impl ComposeView {
                         ui.separator();
                         ui.add_space(4.0);
 
-                        // 3. Dynamic Height Multiline Editor
+                        // 4. Dynamic Height Multiline Editor
                         let available_h = ui.available_height();
                         let extra_bottom_space = if self.reply_quote.is_some() { 240.0 } else { 120.0 };
                         let editor_min_h = (available_h - extra_bottom_space).max(180.0);
@@ -530,7 +539,7 @@ impl ComposeView {
                             );
                         }
 
-                        // 4. Attached Signature Indicator & Live Preview
+                        // 5. Attached Signature Indicator & Live Preview
                         ui.add_space(8.0);
                         let attached_sig = self.selected_signature_id.as_ref().and_then(|id| {
                             signatures.iter().find(|s| &s.id == id)
@@ -548,12 +557,12 @@ impl ComposeView {
                                         ui.label(RichText::new(&sig.name).size(12.0).strong().color(AppTheme::TEXT_PRIMARY));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.small_button(RichText::new("✖ Detach").color(AppTheme::ACCENT_DANGER)).on_hover_text("Do not attach signature to this email").clicked() {
+                                            if ui.small_button(RichText::new("× Detach").color(AppTheme::ACCENT_DANGER)).on_hover_text("Do not attach signature to this email").clicked() {
                                                 self.selected_signature_id = None;
                                             }
 
                                             egui::ComboBox::from_id_salt("compose_sig_switch_combo")
-                                                .selected_text("Change ▾")
+                                                .selected_text("Change")
                                                 .show_ui(ui, |ui| {
                                                     for s in signatures {
                                                         let is_sel = self.selected_signature_id.as_deref() == Some(&s.id);
@@ -568,7 +577,7 @@ impl ComposeView {
                                         ui.label(RichText::new("🖋️ No signature attached").size(12.0).color(AppTheme::TEXT_MUTED));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             egui::ComboBox::from_id_salt("compose_sig_add_combo")
-                                                .selected_text("＋ Attach Signature ▾")
+                                                .selected_text("+ Attach Signature")
                                                 .show_ui(ui, |ui| {
                                                     for s in signatures {
                                                         let label = if s.is_default { format!("{} [Default]", s.name) } else { s.name.clone() };
@@ -590,7 +599,7 @@ impl ComposeView {
                                 }
                             });
 
-                        // 5. Quoted Original Message (Previous Email)
+                        // 6. Quoted Original Message (Previous Email)
                         if let Some(ref mut quote) = self.reply_quote {
                             ui.add_space(8.0);
                             egui::Frame::none()
@@ -603,7 +612,7 @@ impl ComposeView {
                                         ui.label(RichText::new("💬 Quoted Original Message:").size(12.0).strong().color(AppTheme::TEXT_SECONDARY));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            let toggle_label = if self.show_quoted_text { "▲ Hide Quote" } else { "▼ Show / Edit Quote" };
+                                            let toggle_label = if self.show_quoted_text { "Hide Quote" } else { "Show / Edit Quote" };
                                             if ui.small_button(RichText::new(toggle_label).size(11.0)).clicked() {
                                                 self.show_quoted_text = !self.show_quoted_text;
                                             }
