@@ -2041,6 +2041,7 @@ mod tests {
             body_html: None,
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         };
 
         let scheduled_past = ScheduledEmail::new(account.id.clone(), outgoing.clone(), now - 30);
@@ -2373,6 +2374,7 @@ mod tests {
             body_html: None,
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         };
 
         let mut item = OutboxItem::new(account.id.clone(), draft);

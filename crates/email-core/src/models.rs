@@ -699,6 +699,27 @@ pub struct AppBackup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutgoingAttachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub data_base64: String,
+    pub size_bytes: usize,
+}
+
+impl OutgoingAttachment {
+    pub fn new(filename: String, mime_type: String, data: &[u8]) -> Self {
+        use base64::Engine;
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(data);
+        Self {
+            filename,
+            mime_type,
+            data_base64,
+            size_bytes: data.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutgoingDraft {
     pub account_id: String,
     pub to: Vec<Recipient>,
@@ -709,6 +730,8 @@ pub struct OutgoingDraft {
     pub body_html: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<OutgoingAttachment>,
 }
 
 #[cfg(test)]
@@ -814,6 +837,7 @@ mod backup_tests {
             body_html: None,
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         };
 
         // Past timestamp is due
@@ -823,5 +847,20 @@ mod backup_tests {
         // Future timestamp is not due
         let future = ScheduledEmail::new("acc_1".to_string(), draft, Utc::now().timestamp() + 3600);
         assert!(!future.is_due());
+    }
+
+    #[test]
+    fn test_outgoing_attachment_creation_and_json() {
+        let raw_data = b"Hello, World attachment bytes";
+        let att = OutgoingAttachment::new("document.pdf".to_string(), "application/pdf".to_string(), raw_data);
+        assert_eq!(att.filename, "document.pdf");
+        assert_eq!(att.mime_type, "application/pdf");
+        assert_eq!(att.size_bytes, raw_data.len());
+        assert!(!att.data_base64.is_empty());
+
+        let json = serde_json::to_string(&att).expect("Serialize attachment");
+        let restored: OutgoingAttachment = serde_json::from_str(&json).expect("Deserialize attachment");
+        assert_eq!(restored.filename, "document.pdf");
+        assert_eq!(restored.size_bytes, raw_data.len());
     }
 }

@@ -11,3 +11,4 @@ log = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
+base64 = { workspace = true }

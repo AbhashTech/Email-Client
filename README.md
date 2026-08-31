@@ -87,6 +87,8 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 - **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.
 - **⚡ Markdown Compose Mode with Live Preview**: Side-by-side split screen for drafting emails in Markdown with real-time rendered HTML preview. Includes formatting action buttons for Bold, Italic, Headings, Lists, Blockquotes, and Code Blocks.
 - **🌐 HTML & Plain Text Modes**: Full support for HTML rich text and Text-Only drafting modes.
+- **📎 Attachment Drag-and-Drop (`[📎 Attach]`)**: Drag files directly from your OS file manager into the composer window or use the file picker. Attached files display interactive chip pills with filenames, formatted sizes (KB/MB), and 1-click removal.
+- **📦 MIME Multipart Encoding**: Automatic base64 attachment serialization and RFC 2046 `multipart/mixed` structure generation with automatic MIME type discovery.
 - **↩ 5-Second Undo Send**: Outgoing emails enter a 5-second safety buffer with a floating countdown bar (`[ ↩ Undo Send ]` / `[ ⚡ Send Now ]`). Clicking Undo immediately aborts transmission and restores the full draft into the composer.
 - **🖋️ Default & Custom Signatures (Create & Edit)**: Edit and manage account-specific or global signatures with HTML sanitization.
 - **📋 Quick Templates & Snippets (Create & Edit)**: Edit and manage reusable response templates with quick shortcut triggers (e.g. `/meeting`, `/followup`).

@@ -91,7 +91,39 @@ impl SmtpClient {
             builder = builder.references(refs.clone());
         }
 
-        let email = if let Some(ref html) = draft.body_html {
+        let email = if !draft.attachments.is_empty() {
+            let mut mixed = if let Some(ref html) = draft.body_html {
+                let plain_part = SinglePart::builder()
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(draft.body_plain.clone());
+                let html_part = SinglePart::builder()
+                    .header(ContentType::TEXT_HTML)
+                    .body(html.clone());
+                let alternative = MultiPart::alternative()
+                    .singlepart(plain_part)
+                    .singlepart(html_part);
+                MultiPart::mixed().multipart(alternative)
+            } else {
+                let plain_part = SinglePart::builder()
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(draft.body_plain.clone());
+                MultiPart::mixed().singlepart(plain_part)
+            };
+
+            use base64::Engine;
+            for att in &draft.attachments {
+                if let Ok(raw_bytes) = base64::engine::general_purpose::STANDARD.decode(&att.data_base64) {
+                    let content_type = ContentType::parse(&att.mime_type)
+                        .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
+                    let part = lettre::message::Attachment::new(att.filename.clone()).body(raw_bytes, content_type);
+                    mixed = mixed.singlepart(part);
+                }
+            }
+
+            builder
+                .multipart(mixed)
+                .map_err(|e| EmailError::Smtp(format!("Failed to build multipart email with attachments: {}", e)))?
+        } else if let Some(ref html) = draft.body_html {
             // Send alternative multipart: plain text + HTML
             let plain_part = SinglePart::builder()
                 .header(ContentType::TEXT_PLAIN)

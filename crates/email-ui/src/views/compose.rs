@@ -37,6 +37,7 @@ pub struct ComposeView {
     pub custom_schedule_mins: u32,
     pub enable_pgp_encryption: bool,
     pub enable_pgp_signing: bool,
+    pub attachments: Vec<email_core::models::OutgoingAttachment>,
 }
 
 fn find_default_signature<'a>(signatures: &'a [Signature], account_id: Option<&str>) -> Option<&'a Signature> {
@@ -89,6 +90,7 @@ impl ComposeView {
             custom_schedule_mins: 0,
             enable_pgp_encryption: false,
             enable_pgp_signing: false,
+            attachments: Vec::new(),
         }
     }
 
@@ -108,6 +110,7 @@ impl ComposeView {
         self.in_reply_to = None;
         self.references = None;
         self.error_msg = None;
+        self.attachments.clear();
         self.status_msg = None;
         self.show_custom_schedule_dialog = false;
         if let Some(aid) = default_account_id {
@@ -258,12 +261,28 @@ impl ComposeView {
             .open(&mut is_open)
             .collapsible(false)
             .resizable(true)
-            .default_width(700.0)
-            .default_height(500.0)
+            .default_width(720.0)
+            .default_height(540.0)
             .show(ctx, |ui| {
                 if accounts.is_empty() {
                     ui.label("No email accounts configured. Please add an account first.");
                     return;
+                }
+
+                // Process Drag and Drop files
+                let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+                if !dropped_files.is_empty() {
+                    for file in dropped_files {
+                        if let Some(ref path) = file.path {
+                            if let Ok(bytes) = std::fs::read(path) {
+                                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file.bin".to_string());
+                                self.attachments.push(email_core::models::OutgoingAttachment::new(name, "application/octet-stream".to_string(), &bytes));
+                            }
+                        } else if let Some(bytes) = file.bytes {
+                            let name = if file.name.is_empty() { "dropped_file.bin".to_string() } else { file.name };
+                            self.attachments.push(email_core::models::OutgoingAttachment::new(name, "application/octet-stream".to_string(), &bytes.to_vec()));
+                        }
+                    }
                 }
 
                 if self.selected_account_id.is_empty() {
@@ -297,7 +316,7 @@ impl ComposeView {
                         .selected_text(RichText::new("⏰ Send Later ▾").size(12.0).color(AppTheme::ACCENT_PRIMARY))
                         .show_ui(ui, |ui| {
                             let now = Utc::now();
-                            if ui.button("⏰ In 15 minutes").clicked() {
+                            if ui.button("⚡ In 15 minutes").clicked() {
                                 let target_ts = (now + Duration::minutes(15)).timestamp();
                                 if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
                                     *status_toast = Some(("✓ Email scheduled for in 15 minutes".to_string(), std::time::Instant::now()));
@@ -311,7 +330,7 @@ impl ComposeView {
                                     *on_data_changed = true;
                                 }
                             }
-                            if ui.button("⏰ In 3 hours").clicked() {
+                            if ui.button("🕒 In 3 hours").clicked() {
                                 let target_ts = (now + Duration::hours(3)).timestamp();
                                 if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
                                     *status_toast = Some(("✓ Email scheduled for in 3 hours".to_string(), std::time::Instant::now()));
@@ -327,6 +346,19 @@ impl ComposeView {
                     if ui.button(RichText::new("💾 Save Draft").size(12.0)).clicked() {
                         let _ = self.save_draft_to_storage(storage);
                         *on_data_changed = true;
+                    }
+
+                    // Attach Files Button
+                    if ui.button(RichText::new("📎 Attach").size(12.0)).on_hover_text("Attach files or drag and drop into composer").clicked() {
+                        let dialog = rfd::FileDialog::new().set_title("Select Files to Attach");
+                        if let Some(paths) = dialog.pick_files() {
+                            for path in paths {
+                                if let Ok(bytes) = std::fs::read(&path) {
+                                    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "attachment.bin".to_string());
+                                    self.attachments.push(email_core::models::OutgoingAttachment::new(name, "application/octet-stream".to_string(), &bytes));
+                                }
+                            }
+                        }
                     }
 
                     ui.add_space(4.0);
@@ -437,7 +469,41 @@ impl ComposeView {
                     ui.horizontal(|ui| { ui.label("Cc:"); ui.text_edit_singleline(&mut self.cc_input); });
                     ui.horizontal(|ui| { ui.label("Bcc:"); ui.text_edit_singleline(&mut self.bcc_input); });
                 }
+                ui.add_space(4.0);
                 ui.horizontal(|ui| { ui.label("Subject:"); ui.text_edit_singleline(&mut self.subject); });
+
+                // Attachments List View
+                if !self.attachments.is_empty() {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("📎 Attachments:").size(12.0).strong().color(AppTheme::TEXT_MUTED));
+                        let mut to_remove = None;
+                        for (idx, att) in self.attachments.iter().enumerate() {
+                            let size_kb = att.size_bytes as f64 / 1024.0;
+                            let size_str = if size_kb > 1024.0 {
+                                format!("{:.1} MB", size_kb / 1024.0)
+                            } else {
+                                format!("{:.1} KB", size_kb)
+                            };
+                            egui::Frame::none()
+                                .fill(AppTheme::BG_CARD)
+                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                .rounding(Rounding::same(6.0))
+                                .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("📄 {} ({})", att.filename, size_str)).size(11.5));
+                                        if ui.small_button(RichText::new("✕").size(10.0).color(AppTheme::ACCENT_DANGER)).clicked() {
+                                            to_remove = Some(idx);
+                                        }
+                                    });
+                                });
+                        }
+                        if let Some(idx) = to_remove {
+                            self.attachments.remove(idx);
+                        }
+                    });
+                }
 
                 ui.add_space(6.0);
                 ui.separator();
@@ -588,6 +654,7 @@ impl ComposeView {
             body_html: final_html,
             in_reply_to: self.in_reply_to.clone(),
             references: self.references.clone(),
+            attachments: self.attachments.clone(),
         })
     }
 
