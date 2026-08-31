@@ -1,4 +1,4 @@
-pub const SCHEMA_V1: &str = r#"
+pub const SCHEMA_TABLES: &str = r#"
 -- Accounts
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
@@ -138,7 +138,9 @@ CREATE TABLE IF NOT EXISTS outbox (
     last_error TEXT,
     created_at INTEGER NOT NULL
 );
+"#;
 
+pub const SCHEMA_INDEXES_AND_FTS: &str = r#"
 -- Indexes for lightning fast lookups
 CREATE INDEX IF NOT EXISTS idx_messages_folder_date ON messages(folder_id, date_epoch DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_account_unread ON messages(account_id, is_read);
@@ -191,3 +193,6 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
     );
 END;
 "#;
+
+pub const SCHEMA_V1: &str = SCHEMA_TABLES;
+

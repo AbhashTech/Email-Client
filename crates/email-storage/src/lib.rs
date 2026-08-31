@@ -102,9 +102,73 @@ impl Storage {
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         let _ = conn.pragma_update(None, "foreign_keys", "ON");
-        conn.execute_batch(schema::SCHEMA_V1)
-            .map_err(|e| EmailError::Database(format!("Schema init error: {}", e)))?;
-        info!("SQLite database initialized successfully with WAL mode.");
+
+        // 1. Create base tables
+        conn.execute_batch(schema::SCHEMA_TABLES)
+            .map_err(|e| EmailError::Database(format!("Base schema init error: {}", e)))?;
+
+        // 2. Perform safe column migrations on existing tables before index creation
+        Self::migrate_columns(&conn)?;
+
+        // 3. Create indexes, triggers, and FTS5 virtual tables
+        conn.execute_batch(schema::SCHEMA_INDEXES_AND_FTS)
+            .map_err(|e| EmailError::Database(format!("Indexes & FTS init error: {}", e)))?;
+
+        // 4. Populate FTS5 table if existing messages are not yet indexed
+        let fts_count: i64 = conn
+            .query_row("SELECT count(*) FROM messages_fts", [], |r| r.get(0))
+            .unwrap_or(0);
+        let msg_count: i64 = conn
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .unwrap_or(0);
+        if fts_count == 0 && msg_count > 0 {
+            let _ = conn.execute_batch(r#"
+                INSERT INTO messages_fts(
+                    rowid, message_id, account_id, folder_id, subject,
+                    from_name, from_address, snippet, body_text, to_recipients
+                )
+                SELECT
+                    rowid, id, account_id, folder_id, subject,
+                    coalesce(from_name, ''), from_address, snippet,
+                    coalesce(body_plain, ''), to_recipients_json
+                FROM messages;
+            "#);
+        }
+
+        info!("SQLite database initialized successfully with WAL mode & automated migrations.");
+        Ok(())
+    }
+
+    fn migrate_columns(conn: &rusqlite::Connection) -> Result<()> {
+        // Check messages table columns
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(messages)")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| EmailError::Database(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !columns.is_empty() && !columns.iter().any(|c| c == "snooze_until") {
+            conn.execute("ALTER TABLE messages ADD COLUMN snooze_until INTEGER", [])
+                .map_err(|e| EmailError::Database(format!("Failed to add snooze_until column: {}", e)))?;
+        }
+
+        // Check accounts table columns
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(accounts)")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        let acc_columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| EmailError::Database(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !acc_columns.is_empty() && !acc_columns.iter().any(|c| c == "sync_days_window") {
+            let _ = conn.execute("ALTER TABLE accounts ADD COLUMN sync_days_window INTEGER NOT NULL DEFAULT 30", []);
+        }
+
         Ok(())
     }
 
@@ -2404,6 +2468,77 @@ mod tests {
         storage.delete_outbox_item(&item.id).unwrap();
         let all_after = storage.get_all_outbox_items(None).unwrap();
         assert!(all_after.is_empty());
+    }
+
+    #[test]
+    fn test_database_auto_migration_from_legacy_schema() {
+        let db_path = std::env::temp_dir().join(format!("legacy_test_{}.db", uuid::Uuid::new_v4()));
+
+        // 1. Create a legacy database manually without snooze_until column
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(r#"
+                CREATE TABLE accounts (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    imap_host TEXT NOT NULL,
+                    imap_port INTEGER NOT NULL,
+                    imap_security TEXT NOT NULL,
+                    smtp_host TEXT NOT NULL,
+                    smtp_port INTEGER NOT NULL,
+                    smtp_security TEXT NOT NULL,
+                    auth_type TEXT NOT NULL,
+                    credential_key TEXT NOT NULL,
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE folders (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    remote_name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    delimiter TEXT NOT NULL DEFAULT '/',
+                    attributes TEXT NOT NULL DEFAULT '[]',
+                    is_synced INTEGER NOT NULL DEFAULT 1,
+                    last_synced_uid INTEGER NOT NULL DEFAULT 0,
+                    uid_validity INTEGER NOT NULL DEFAULT 0,
+                    total_messages INTEGER NOT NULL DEFAULT 0,
+                    unread_messages INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(account_id, remote_name)
+                );
+                CREATE TABLE messages (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    folder_id TEXT NOT NULL,
+                    uid INTEGER NOT NULL,
+                    message_id TEXT,
+                    in_reply_to TEXT,
+                    subject TEXT NOT NULL DEFAULT '',
+                    from_name TEXT,
+                    from_address TEXT NOT NULL,
+                    to_recipients_json TEXT NOT NULL DEFAULT '[]',
+                    cc_recipients_json TEXT NOT NULL DEFAULT '[]',
+                    date_epoch INTEGER NOT NULL,
+                    snippet TEXT NOT NULL DEFAULT '',
+                    is_read INTEGER NOT NULL DEFAULT 0,
+                    is_flagged INTEGER NOT NULL DEFAULT 0,
+                    is_draft INTEGER NOT NULL DEFAULT 0,
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    body_plain TEXT,
+                    body_html TEXT,
+                    body_fetched INTEGER NOT NULL DEFAULT 0,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(folder_id, uid)
+                );
+            "#).unwrap();
+        }
+
+        // 2. Open with Storage::new — should run automatic migration without error!
+        let storage = Storage::new(&db_path).expect("Automatic migration succeeded");
+        let accounts = storage.get_accounts().unwrap();
+        assert!(accounts.is_empty());
     }
 }
 
