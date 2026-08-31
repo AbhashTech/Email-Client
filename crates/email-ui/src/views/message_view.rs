@@ -1,3 +1,4 @@
+use base64::Engine;
 use crate::theme::AppTheme;
 use egui::{Color32, FontId, RichText, Rounding, ScrollArea, Sense, Stroke, Ui, Vec2};
 use email_core::events::SyncCommand;
@@ -19,6 +20,7 @@ impl MessageViewPane {
         on_delete: &mut Option<String>,
         on_toggle_read: &mut Option<(String, bool)>,
         on_move_folder: &mut Option<(String, String)>,
+        status_toast: &mut Option<String>,
     ) {
         let Some(detail) = detail_opt else {
             ui.vertical_centered(|ui| {
@@ -270,12 +272,53 @@ impl MessageViewPane {
 
                                     let img_widget = egui::Image::new(&resolved_uri)
                                         .max_width(ui.available_width().min(680.0))
-                                        .rounding(Rounding::same(6.0));
+                                        .rounding(Rounding::same(6.0))
+                                        .sense(Sense::click());
 
-                                    let response = ui.add(img_widget);
+                                    let mut response = ui.add(img_widget);
                                     if let Some(ref alt_text) = alt {
-                                        response.on_hover_text(alt_text);
+                                        response = response.on_hover_text(alt_text);
                                     }
+
+                                    // Right click context menu to Save Image
+                                    let img_uri = resolved_uri.clone();
+                                    response.context_menu(|ui| {
+                                        if ui.button(RichText::new("💾 Save Image As...").size(12.5)).clicked() {
+                                            let default_name = if img_uri.starts_with("file://") {
+                                                std::path::Path::new(img_uri.trim_start_matches("file://"))
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or("image.png")
+                                                    .to_string()
+                                            } else {
+                                                "image.png".to_string()
+                                            };
+
+                                            let dialog = rfd::FileDialog::new()
+                                                .set_file_name(&default_name)
+                                                .set_title("Save Image As...");
+
+                                            if let Some(dest_path) = dialog.save_file() {
+                                                if img_uri.starts_with("file://") {
+                                                    let local_path = img_uri.trim_start_matches("file://");
+                                                    if std::fs::copy(local_path, &dest_path).is_ok() {
+                                                        *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                    }
+                                                } else if img_uri.starts_with("data:") {
+                                                    if let Some(comma_pos) = img_uri.find(',') {
+                                                        let b64_data = &img_uri[comma_pos + 1..];
+                                                        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
+                                                            if std::fs::write(&dest_path, decoded).is_ok() {
+                                                                *status_toast = Some(format!("Saved image to {}", dest_path.display()));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            ui.close_menu();
+                                        }
+                                    });
+
                                     ui.add_space(6.0);
                                 }
                                 HtmlBlock::CodeBlock(code) => {
@@ -310,7 +353,7 @@ impl MessageViewPane {
                 ui.add_space(16.0);
 
                 ui.label(
-                    RichText::new(format!("📎 ATTACHMENTS ({}) — Click to Save to Downloads", detail.attachments.len()))
+                    RichText::new(format!("📎 ATTACHMENTS ({}) — Click to Save", detail.attachments.len()))
                         .size(11.5)
                         .strong()
                         .color(AppTheme::TEXT_MUTED),
@@ -337,12 +380,15 @@ impl MessageViewPane {
                             if let Some(ref cache_path) = att.local_cache_path {
                                 let src_path = std::path::Path::new(cache_path);
                                 if src_path.exists() {
-                                    let download_dir = dirs_download();
-                                    let dest_path = download_dir.join(&att.filename);
-                                    let _ = std::fs::copy(src_path, &dest_path);
-                                    let _ = std::process::Command::new("xdg-open")
-                                        .arg(&dest_path)
-                                        .spawn();
+                                    let dialog = rfd::FileDialog::new()
+                                        .set_file_name(&att.filename)
+                                        .set_title("Save Attachment As...");
+
+                                    if let Some(dest_path) = dialog.save_file() {
+                                        if std::fs::copy(src_path, &dest_path).is_ok() {
+                                            *status_toast = Some(format!("Saved attachment to {}", dest_path.display()));
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -377,28 +423,18 @@ impl MessageViewPane {
                                 ui.add_space(2.0);
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(&size_text).size(10.5).color(AppTheme::TEXT_MUTED));
-                                    ui.label(RichText::new("• ⬇ Download").size(10.5).color(AppTheme::ACCENT_PRIMARY));
+                                    ui.label(RichText::new("• 💾 Save").size(10.5).color(AppTheme::ACCENT_PRIMARY));
                                 });
                             });
                         });
 
-                        resp.on_hover_text(format!("Click to download '{}' to ~/Downloads and open", att.filename));
+                        resp.on_hover_text(format!("Click to choose where to save '{}'", att.filename));
                     }
                 });
             }
 
             ui.add_space(30.0);
         });
-    }
-}
-
-fn dirs_download() -> std::path::PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let p = std::path::PathBuf::from(home).join("Downloads");
-        let _ = std::fs::create_dir_all(&p);
-        p
-    } else {
-        std::path::PathBuf::from(".")
     }
 }
 

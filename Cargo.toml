@@ -52,3 +52,5 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 html-escape = "0.2"
 regex = "1.10"
 futures = "0.3"
+rfd = "0.15"
+base64 = "0.22"

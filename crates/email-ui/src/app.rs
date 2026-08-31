@@ -32,6 +32,7 @@ pub struct EmailApp {
     selected_message_id: Option<String>,
     search_query: String,
     status_text: String,
+    status_toast: Option<(String, std::time::Instant)>,
     is_syncing: bool,
 
     // Sub-views
@@ -71,6 +72,7 @@ impl EmailApp {
             selected_message_id: None,
             search_query: String::new(),
             status_text: "Ready".to_string(),
+            status_toast: None,
             is_syncing: false,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
@@ -440,6 +442,7 @@ impl App for EmailApp {
         let mut on_delete = None;
         let mut on_toggle_read_view = None;
         let mut on_move_folder = None;
+        let mut on_status_toast = None;
 
         let active_folders = if let Some(ref detail) = self.selected_message_detail {
             self.folders_by_account
@@ -462,8 +465,14 @@ impl App for EmailApp {
                 &mut on_delete,
                 &mut on_toggle_read_view,
                 &mut on_move_folder,
+                &mut on_status_toast,
             );
         });
+
+        if let Some(toast_msg) = on_status_toast {
+            self.status_toast = Some((toast_msg.clone(), std::time::Instant::now()));
+            self.status_text = toast_msg;
+        }
 
         // Handle reading pane actions
         if let Some(detail) = on_reply {
@@ -599,6 +608,30 @@ impl App for EmailApp {
 
         if on_data_changed {
             self.reload_data();
+        }
+
+        // Floating Toast Notification
+        if let Some((ref toast_text, instant)) = self.status_toast {
+            if instant.elapsed().as_secs() < 6 {
+                let toast_layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("toast_notification"));
+                let toast_ui = ctx.layer_painter(toast_layer);
+                let screen_rect = ctx.screen_rect();
+                let toast_width = (toast_text.len() as f32 * 7.5 + 40.0).clamp(240.0, 520.0);
+                let toast_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(screen_rect.right() - toast_width - 24.0, screen_rect.bottom() - 60.0),
+                    egui::Vec2::new(toast_width, 38.0),
+                );
+                toast_ui.rect_filled(toast_rect, egui::Rounding::same(8.0), egui::Color32::from_rgb(20, 30, 48));
+                toast_ui.rect_stroke(toast_rect, egui::Rounding::same(8.0), egui::Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
+                toast_ui.text(
+                    toast_rect.left_center() + egui::Vec2::new(14.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    format!("✓ {}", toast_text),
+                    egui::FontId::proportional(12.0),
+                    egui::Color32::WHITE,
+                );
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
         }
 
         // Continuous redraw when syncing
