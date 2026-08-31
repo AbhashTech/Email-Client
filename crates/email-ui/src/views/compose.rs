@@ -1,7 +1,7 @@
 use crate::theme::AppTheme;
 use egui::{Color32, RichText, Rounding, Window};
 use email_core::events::SyncCommand;
-use email_core::models::{Account, OutgoingDraft, Recipient, Signature, Template};
+use email_core::models::{Account, MessageHeader, OutgoingDraft, Recipient, Signature, Template};
 use email_keychain::CredentialStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -90,6 +90,7 @@ impl ComposeView {
         &mut self,
         account_id: &str,
         to: &str,
+        cc: &str,
         subject: &str,
         in_reply_to: Option<String>,
         body_quote: &str,
@@ -99,8 +100,9 @@ impl ComposeView {
         self.is_open = true;
         self.selected_account_id = account_id.to_string();
         self.to_input = to.to_string();
-        self.cc_input.clear();
+        self.cc_input = cc.to_string();
         self.bcc_input.clear();
+        self.show_cc_bcc = !cc.is_empty();
         self.subject = if subject.to_lowercase().starts_with("re:") {
             subject.to_string()
         } else {
@@ -471,6 +473,56 @@ impl ComposeView {
     }
 }
 
+pub fn build_reply_all_recipients(
+    header: &MessageHeader,
+    my_emails: &std::collections::HashSet<String>,
+) -> (String, String) {
+    let from_clean = header.from_address.trim().to_string();
+    let from_lower = from_clean.to_lowercase();
+
+    let mut to_list: Vec<String> = Vec::new();
+    let mut cc_list: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // If 'from' is not one of our own accounts, 'from' is the primary recipient
+    if !from_clean.is_empty() && !my_emails.contains(&from_lower) {
+        to_list.push(from_clean.clone());
+        seen.insert(from_lower);
+    }
+
+    // Process all 'to_recipients' from original header
+    for r in &header.to_recipients {
+        let email_clean = r.email.trim().to_string();
+        let email_lower = email_clean.to_lowercase();
+        if email_clean.is_empty() || my_emails.contains(&email_lower) || seen.contains(&email_lower) {
+            continue;
+        }
+        seen.insert(email_lower);
+        if to_list.is_empty() {
+            to_list.push(email_clean);
+        } else {
+            cc_list.push(email_clean);
+        }
+    }
+
+    // Process all 'cc_recipients' from original header
+    for r in &header.cc_recipients {
+        let email_clean = r.email.trim().to_string();
+        let email_lower = email_clean.to_lowercase();
+        if email_clean.is_empty() || my_emails.contains(&email_lower) || seen.contains(&email_lower) {
+            continue;
+        }
+        seen.insert(email_lower);
+        if to_list.is_empty() {
+            to_list.push(email_clean);
+        } else {
+            cc_list.push(email_clean);
+        }
+    }
+
+    (to_list.join(", "), cc_list.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +568,7 @@ mod tests {
         compose.open_reply(
             "acc1",
             "test@example.com",
+            "",
             "Hello",
             Some("msg-123".to_string()),
             "This is the previous message.",
@@ -528,6 +581,45 @@ mod tests {
         assert_eq!(compose.subject, "Re: Hello");
         assert!(compose.selected_signature_id.is_some());
         assert!(compose.reply_quote.as_ref().unwrap().contains("This is the previous message."));
+    }
+
+    #[test]
+    fn test_build_reply_all_recipients_excludes_self() {
+        let mut my_emails = std::collections::HashSet::new();
+        my_emails.insert("kunal@abhashtech.com".to_string());
+
+        let header = MessageHeader {
+            id: "msg-1".to_string(),
+            account_id: "acc-1".to_string(),
+            folder_id: "inbox".to_string(),
+            uid: 100,
+            message_id: Some("mid-1".to_string()),
+            in_reply_to: None,
+            subject: "Project Update".to_string(),
+            from_name: Some("Alice".to_string()),
+            from_address: "alice@work.com".to_string(),
+            to_recipients: vec![
+                Recipient::new(Some("Kunal".to_string()), "kunal@abhashtech.com".to_string()),
+                Recipient::new(Some("Bob".to_string()), "bob@work.com".to_string()),
+            ],
+            cc_recipients: vec![
+                Recipient::new(Some("Carol".to_string()), "carol@work.com".to_string()),
+            ],
+            date_epoch: 1234567890,
+            snippet: "Snippet".to_string(),
+            is_read: true,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 1024,
+        };
+
+        let (to, cc) = build_reply_all_recipients(&header, &my_emails);
+        assert_eq!(to, "alice@work.com");
+        assert_eq!(cc, "bob@work.com, carol@work.com");
+        assert!(!to.contains("kunal@abhashtech.com"));
+        assert!(!cc.contains("kunal@abhashtech.com"));
     }
 }
 

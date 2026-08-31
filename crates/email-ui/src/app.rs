@@ -482,6 +482,7 @@ impl App for EmailApp {
             self.compose_view.open_reply(
                 &detail.header.account_id,
                 &detail.header.from_address,
+                "",
                 &detail.header.subject,
                 detail.header.message_id,
                 &quote,
@@ -495,6 +496,7 @@ impl App for EmailApp {
             self.compose_view.open_reply(
                 &detail.header.account_id,
                 &detail.header.from_address,
+                "",
                 &detail.header.subject,
                 detail.header.message_id,
                 &quote,
@@ -505,13 +507,17 @@ impl App for EmailApp {
 
         if let Some(detail) = on_reply_all {
             let quote = detail.body_plain.unwrap_or_default();
-            let mut to_recipients = detail.header.to_recipients.clone();
-            to_recipients.push(email_core::models::Recipient::new(None, detail.header.from_address.clone()));
-            let to_str = to_recipients.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
+            let my_emails: std::collections::HashSet<String> = self
+                .accounts
+                .iter()
+                .map(|a| a.email.trim().to_lowercase())
+                .collect();
+            let (to_str, cc_str) = crate::views::compose::build_reply_all_recipients(&detail.header, &my_emails);
 
             self.compose_view.open_reply(
                 &detail.header.account_id,
                 &to_str,
+                &cc_str,
                 &detail.header.subject,
                 detail.header.message_id,
                 &quote,
@@ -525,6 +531,7 @@ impl App for EmailApp {
             let subj = format!("Fwd: {}", detail.header.subject);
             self.compose_view.open_reply(
                 &detail.header.account_id,
+                "",
                 "",
                 &subj,
                 None,
