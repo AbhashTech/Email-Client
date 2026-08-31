@@ -22,14 +22,21 @@
   - **Per-Folder Sync Selection**: Choose exactly which remote folders to synchronize via `⚙ Settings -> 📬 Accounts`.
   - **Safe Connection Management**: Serialized connection pool with explicit `LOGOUT` lifecycle to prevent account lockout on multi-connection mail providers (Zoho, Hostinger, Gmail, Outlook).
 
+- ✉️ **Modern Composer & Smart Reply**:
+  - **HTML Email by Default**: Default rich HTML email formatting (`🌐 HTML (Default)`) with clean MIME multipart alternative generation and plain-text fallbacks.
+  - **Format Mode Switcher**: Easily toggle between HTML and Text-Only (`📝 Plain Text`) with one click in the composer toolbar.
+  - **Rich Formatting Toolbar**: Quick actions for Bold, Italic, Link insertion, Bulleted lists, and Blockquotes.
+  - **Text-Only Reply Action**: Dedicated `📝 Text Reply` button in the reading pane to reply in clean plain text with converted quoted context.
+  - **Automatic Default Signatures**: Default signatures (account-specific or global) are automatically attached to new emails and replies, with support for rich HTML signatures, HTML sanitization, and toolbar dropdown selector.
+
 - 🎨 **HTML Email Rendering & Inline Images**:
   - Native AST HTML sanitizer that removes conditional comments (`<!--[if ...]>`), XML declarations, and `<style>` blocks.
   - Automatic `cid:xxx` inline MIME attachment resolution with GPU image rendering (PNG, JPEG, WebP, SVG).
-  - One-click attachment downloading: clicking attachments saves them to `~/Downloads` and opens them with the system's default application (`xdg-open`).
+  - One-click attachment downloading: clicking attachments opens a native system file save dialog.
 
 - ⚙️ **Rich Preferences & Customization**:
   - **Account Manager**: Add, edit, test connections, and delete IMAP/SMTP accounts.
-  - **Signatures**: Create, edit, and assign custom default signatures with preview.
+  - **Signatures**: Create, edit, and assign custom default signatures with preview and automatic HTML sanitization.
   - **Quick Templates**: Manage boilerplate snippets with variable substitution (`{{name}}`, `{{sender}}`, `{{date}}`).
   - **General Telemetry**: Live SQLite WAL database stats, resident memory footprint telemetry, and system tray integration.
 
