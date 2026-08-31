@@ -721,6 +721,46 @@ fn inline_markdown_to_html(text: &str) -> String {
     res
 }
 
+/// Helper to extract host domain from a string or URL
+pub fn extract_domain(input: &str) -> Option<String> {
+    let clean = input.trim().to_lowercase();
+    let without_scheme = clean
+        .strip_prefix("https://")
+        .or_else(|| clean.strip_prefix("http://"))
+        .unwrap_or(&clean);
+
+    let host_part = without_scheme.split(&['/', ':', '?', '#'][..]).next()?;
+    let host = host_part.trim_start_matches("www.");
+    if host.contains('.') && !host.contains(' ') && host.len() > 3 {
+        Some(host.to_string())
+    } else {
+        None
+    }
+}
+
+/// Detects potentially deceptive/phishing links where the display text
+/// claims to be one domain (e.g. "paypal.com" or "https://bank.com") but the href
+/// points to a completely different domain (e.g. "http://phish-site.com").
+pub fn is_suspicious_link(display_text: &str, target_url: &str) -> bool {
+    let display_domain = extract_domain(display_text);
+    let target_domain = extract_domain(target_url);
+
+    match (display_domain, target_domain) {
+        (Some(disp), Some(target)) => {
+            disp != target && !target.ends_with(&format!(".{}", disp))
+        }
+        _ => false,
+    }
+}
+
+/// Checks if an HTML block list contains external remote images (http/https)
+pub fn has_remote_images(blocks: &[HtmlBlock]) -> bool {
+    blocks.iter().any(|b| match b {
+        HtmlBlock::Image { src, .. } => src.starts_with("http://") || src.starts_with("https://"),
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,6 +772,7 @@ mod tests {
         assert!(!blocks.is_empty());
         let has_img = blocks.iter().any(|b| matches!(b, HtmlBlock::Image { .. }));
         assert!(has_img);
+        assert!(has_remote_images(&blocks));
     }
 
     #[test]
@@ -753,5 +794,19 @@ mod tests {
         assert!(html.contains("<a href=\"https://example.com\""));
         assert!(html.contains("<li"));
         assert!(html.contains("<blockquote"));
+    }
+
+    #[test]
+    fn test_suspicious_phishing_link_detector() {
+        // Deceptive: Text says paypal.com but points to attacker site
+        assert!(is_suspicious_link("https://paypal.com/login", "http://evil-phishing.com/steal"));
+        assert!(is_suspicious_link("paypal.com", "https://paypal-fake-login.com"));
+
+        // Safe: Text is normal words
+        assert!(!is_suspicious_link("Click here to view dashboard", "https://app.company.com/dashboard"));
+
+        // Safe: Text domain matches target domain
+        assert!(!is_suspicious_link("google.com", "https://www.google.com/search"));
+        assert!(!is_suspicious_link("https://github.com", "https://github.com/rust-lang/rust"));
     }
 }

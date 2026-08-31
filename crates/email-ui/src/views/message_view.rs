@@ -13,6 +13,7 @@ impl MessageViewPane {
         ui: &mut Ui,
         detail_opt: Option<&MessageDetail>,
         folders: &[Folder],
+        allowed_remote_images: &mut std::collections::HashSet<String>,
         cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
         on_reply: &mut Option<MessageDetail>,
         on_reply_plain: &mut Option<MessageDetail>,
@@ -248,6 +249,30 @@ impl MessageViewPane {
                             });
                         }
                     } else {
+                        let has_remote = email_html::has_remote_images(&blocks);
+                        let is_remote_allowed = allowed_remote_images.contains(&msg.id);
+
+                        // Privacy Shield Banner
+                        if has_remote && !is_remote_allowed {
+                            ui.add_space(4.0);
+                            let banner_width = wrap_width.min(600.0).max(320.0);
+                            ui.vertical_centered(|ui| {
+                                let (shield_rect, _) = ui.allocate_exact_size(Vec2::new(banner_width, 36.0), Sense::hover());
+                                ui.painter().rect_filled(shield_rect, Rounding::same(6.0), Color32::from_rgb(26, 32, 44));
+                                ui.painter().rect_stroke(shield_rect, Rounding::same(6.0), Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
+                                let mut shield_ui = ui.new_child(egui::UiBuilder::new().max_rect(shield_rect));
+                                shield_ui.horizontal_centered(|ui| {
+                                    ui.add_space(10.0);
+                                    ui.label(RichText::new("🛡️").size(14.0));
+                                    ui.label(RichText::new("Remote images blocked for privacy.").size(12.0).color(Color32::WHITE));
+                                    if ui.button(RichText::new("🖼 Load Images").size(11.0).strong()).clicked() {
+                                        allowed_remote_images.insert(msg.id.clone());
+                                    }
+                                });
+                            });
+                            ui.add_space(8.0);
+                        }
+
                         // Centered Canvas Container (like Gmail)
                         ui.vertical_centered(|ui| {
                             egui::Frame::none()
@@ -303,18 +328,29 @@ impl MessageViewPane {
                                                 let bg = Color32::from_rgb(bg_color.0, bg_color.1, bg_color.2);
                                                 let fg = Color32::from_rgb(text_color.0, text_color.1, text_color.2);
 
+                                                let is_suspicious = email_html::is_suspicious_link(&text, &url);
+
                                                 let btn_ui = |ui: &mut egui::Ui| {
+                                                    let btn_label = if is_suspicious {
+                                                        format!("⚠️ {}", text)
+                                                    } else {
+                                                        text.clone()
+                                                    };
                                                     let btn = egui::Button::new(
-                                                        RichText::new(&text)
+                                                        RichText::new(&btn_label)
                                                             .size(14.5)
                                                             .strong()
                                                             .color(fg),
                                                     )
-                                                    .fill(bg)
+                                                    .fill(if is_suspicious { Color32::from_rgb(185, 28, 28) } else { bg })
                                                     .rounding(Rounding::same(8.0))
                                                     .min_size(Vec2::new(140.0, 42.0));
 
-                                                    if ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                                    let mut response = ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand);
+                                                    if is_suspicious {
+                                                        response = response.on_hover_text(format!("⚠️ Suspicious link! Display text points to a different domain than '{}'", url));
+                                                    }
+                                                    if response.clicked() {
                                                         ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
                                                     }
                                                 };
@@ -351,80 +387,106 @@ impl MessageViewPane {
                                             }
                                             HtmlBlock::Image { src, alt, is_center } => {
                                                 ui.add_space(6.0);
-                                                let resolved_uri = if src.starts_with("cid:") {
-                                                    let cid_key = src.trim_start_matches("cid:").trim_matches(|c| c == '<' || c == '>');
-                                                    if let Some(matching_att) = detail.attachments.iter().find(|a| {
-                                                         a.content_id.as_deref() == Some(cid_key) || a.filename == cid_key
-                                                    }) {
-                                                        if let Some(ref path) = matching_att.local_cache_path {
-                                                            format!("file://{}", path)
+                                                let is_external = src.starts_with("http://") || src.starts_with("https://");
+
+                                                if is_external && !is_remote_allowed {
+                                                    // Remote image blocked placeholder
+                                                    let mut block_ui = |ui: &mut egui::Ui| {
+                                                        egui::Frame::none()
+                                                            .fill(Color32::from_rgb(245, 240, 230))
+                                                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(220, 210, 195)))
+                                                            .rounding(Rounding::same(6.0))
+                                                            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
+                                                            .show(ui, |ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(RichText::new("🛡️ Remote image blocked").size(12.0).color(Color32::from_rgb(120, 110, 100)));
+                                                                    if ui.small_button("Show").clicked() {
+                                                                        allowed_remote_images.insert(msg.id.clone());
+                                                                    }
+                                                                });
+                                                            });
+                                                    };
+                                                    if is_center {
+                                                        ui.vertical_centered(|ui| block_ui(ui));
+                                                    } else {
+                                                        block_ui(ui);
+                                                    }
+                                                } else {
+                                                    let resolved_uri = if src.starts_with("cid:") {
+                                                        let cid_key = src.trim_start_matches("cid:").trim_matches(|c| c == '<' || c == '>');
+                                                        if let Some(matching_att) = detail.attachments.iter().find(|a| {
+                                                             a.content_id.as_deref() == Some(cid_key) || a.filename == cid_key
+                                                        }) {
+                                                            if let Some(ref path) = matching_att.local_cache_path {
+                                                                format!("file://{}", path)
+                                                            } else {
+                                                                src.clone()
+                                                            }
                                                         } else {
                                                             src.clone()
                                                         }
                                                     } else {
                                                         src.clone()
-                                                    }
-                                                } else {
-                                                    src.clone()
-                                                };
+                                                    };
 
-                                                let mut img_render = |ui: &mut egui::Ui| {
-                                                    let img_widget = egui::Image::new(&resolved_uri)
-                                                        .max_width(canvas_width)
-                                                        .rounding(Rounding::same(6.0))
-                                                        .sense(Sense::click());
+                                                    let mut img_render = |ui: &mut egui::Ui| {
+                                                        let img_widget = egui::Image::new(&resolved_uri)
+                                                            .max_width(canvas_width)
+                                                            .rounding(Rounding::same(6.0))
+                                                            .sense(Sense::click());
 
-                                                    let mut response = ui.add(img_widget);
-                                                    if let Some(ref alt_text) = alt {
-                                                        response = response.on_hover_text(alt_text);
-                                                    }
+                                                        let mut response = ui.add(img_widget);
+                                                        if let Some(ref alt_text) = alt {
+                                                            response = response.on_hover_text(alt_text);
+                                                        }
 
-                                                    // Right click context menu to Save Image
-                                                    let img_uri = resolved_uri.clone();
-                                                    response.context_menu(|ui| {
-                                                        if ui.button(RichText::new("💾 Save Image As...").size(12.5)).clicked() {
-                                                            let default_name = if img_uri.starts_with("file://") {
-                                                                std::path::Path::new(img_uri.trim_start_matches("file://"))
-                                                                    .file_name()
-                                                                    .and_then(|n| n.to_str())
-                                                                    .unwrap_or("image.png")
-                                                                    .to_string()
-                                                            } else {
-                                                                "image.png".to_string()
-                                                            };
+                                                        // Right click context menu to Save Image
+                                                        let img_uri = resolved_uri.clone();
+                                                        response.context_menu(|ui| {
+                                                            if ui.button(RichText::new("💾 Save Image As...").size(12.5)).clicked() {
+                                                                let default_name = if img_uri.starts_with("file://") {
+                                                                    std::path::Path::new(img_uri.trim_start_matches("file://"))
+                                                                        .file_name()
+                                                                        .and_then(|n| n.to_str())
+                                                                        .unwrap_or("image.png")
+                                                                        .to_string()
+                                                                } else {
+                                                                    "image.png".to_string()
+                                                                };
 
-                                                            let save_uri = img_uri.clone();
-                                                            std::thread::spawn(move || {
-                                                                let dialog = rfd::FileDialog::new()
-                                                                    .set_file_name(&default_name)
-                                                                    .set_title("Save Image As...");
+                                                                let save_uri = img_uri.clone();
+                                                                std::thread::spawn(move || {
+                                                                    let dialog = rfd::FileDialog::new()
+                                                                        .set_file_name(&default_name)
+                                                                        .set_title("Save Image As...");
 
-                                                                if let Some(dest_path) = dialog.save_file() {
-                                                                    if save_uri.starts_with("file://") {
-                                                                        let local_path = save_uri.trim_start_matches("file://");
-                                                                        let _ = std::fs::copy(local_path, &dest_path);
-                                                                    } else if save_uri.starts_with("data:") {
-                                                                        if let Some(comma_pos) = save_uri.find(',') {
-                                                                            let b64_data = &save_uri[comma_pos + 1..];
-                                                                            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
-                                                                                let _ = std::fs::write(&dest_path, decoded);
+                                                                    if let Some(dest_path) = dialog.save_file() {
+                                                                        if save_uri.starts_with("file://") {
+                                                                            let local_path = save_uri.trim_start_matches("file://");
+                                                                            let _ = std::fs::copy(local_path, &dest_path);
+                                                                        } else if save_uri.starts_with("data:") {
+                                                                            if let Some(comma_pos) = save_uri.find(',') {
+                                                                                let b64_data = &save_uri[comma_pos + 1..];
+                                                                                if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_data.trim()) {
+                                                                                    let _ = std::fs::write(&dest_path, decoded);
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
-                                                                }
-                                                            });
-                                                            *status_toast = Some("Opening file picker...".to_string());
-                                                            ui.close_menu();
-                                                        }
-                                                    });
-                                                };
+                                                                });
+                                                                *status_toast = Some("Opening file picker...".to_string());
+                                                                ui.close_menu();
+                                                            }
+                                                        });
+                                                    };
 
-                                                if is_center {
-                                                    ui.vertical_centered(|ui| {
+                                                    if is_center {
+                                                        ui.vertical_centered(|ui| {
+                                                            img_render(ui);
+                                                        });
+                                                    } else {
                                                         img_render(ui);
-                                                    });
-                                                } else {
-                                                    img_render(ui);
+                                                    }
                                                 }
 
                                                 ui.add_space(8.0);
@@ -607,12 +669,24 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
                 }
 
                 if let Some(ref url) = span.link_url {
-                    let link_col = if is_light_canvas {
-                        Color32::from_rgb(26, 115, 232)
+                    let is_suspicious = email_html::is_suspicious_link(&span.text, url);
+                    if is_suspicious {
+                        let warn_text = RichText::new(format!("⚠️ {} [Deceptive Link!]", span.text))
+                            .size(13.5)
+                            .color(Color32::from_rgb(220, 38, 38))
+                            .strong()
+                            .underline();
+                        ui.hyperlink_to(warn_text, url)
+                            .on_hover_text(format!("⚠️ Suspicious link! Display text is '{}' but target destination is '{}'", span.text, url));
                     } else {
-                        AppTheme::ACCENT_HOVER
-                    };
-                    ui.hyperlink_to(text.color(link_col).underline(), url);
+                        let link_col = if is_light_canvas {
+                            Color32::from_rgb(26, 115, 232)
+                        } else {
+                            AppTheme::ACCENT_HOVER
+                        };
+                        ui.hyperlink_to(text.color(link_col).underline(), url)
+                            .on_hover_text(url);
+                    }
                 } else {
                     ui.label(text);
                 }
