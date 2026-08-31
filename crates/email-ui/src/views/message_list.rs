@@ -167,6 +167,40 @@ impl MessageListView {
                     }
                 });
             });
+
+            // Quick Filter Chips Bar
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 3.0);
+
+                let is_unread_active = has_search_token(search_query, "is:unread");
+                let is_starred_active = has_search_token(search_query, "is:starred") || has_search_token(search_query, "is:flagged");
+                let has_att_active = has_search_token(search_query, "has:attachment") || has_search_token(search_query, "has:attachments");
+                let is_all_active = !is_unread_active && !is_starred_active && !has_att_active;
+
+                let all_btn = ui.selectable_label(is_all_active, RichText::new("All").size(10.5));
+                if all_btn.clicked() {
+                    clear_search_filter_tokens(search_query);
+                }
+
+                let unread_btn = ui.selectable_label(is_unread_active, RichText::new("✉ Unread").size(10.5));
+                if unread_btn.clicked() {
+                    toggle_search_token(search_query, "is:unread");
+                }
+
+                let star_btn = ui.selectable_label(
+                    is_starred_active,
+                    RichText::new("★ Starred").size(10.5).color(if is_starred_active { AppTheme::ACCENT_STAR } else { AppTheme::TEXT_MUTED }),
+                );
+                if star_btn.clicked() {
+                    toggle_search_token(search_query, "is:starred");
+                }
+
+                let att_btn = ui.selectable_label(has_att_active, RichText::new("📎 Files").size(10.5));
+                if att_btn.clicked() {
+                    toggle_search_token(search_query, "has:attachment");
+                }
+            });
         }
 
         ui.add_space(6.0);
@@ -428,3 +462,51 @@ impl MessageListView {
             });
     }
 }
+
+fn toggle_search_token(query: &mut String, token: &str) {
+    let mut tokens: Vec<String> = query.split_whitespace().map(|s| s.to_string()).collect();
+    if let Some(pos) = tokens.iter().position(|t| t.eq_ignore_ascii_case(token)) {
+        tokens.remove(pos);
+    } else {
+        tokens.push(token.to_string());
+    }
+    *query = tokens.join(" ");
+}
+
+fn has_search_token(query: &str, token: &str) -> bool {
+    query.split_whitespace().any(|t| t.eq_ignore_ascii_case(token))
+}
+
+fn clear_search_filter_tokens(query: &mut String) {
+    let filter_tokens = ["is:unread", "is:read", "is:starred", "is:flagged", "has:attachment", "has:attachments"];
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| !filter_tokens.iter().any(|ft| t.eq_ignore_ascii_case(ft)))
+        .map(|s| s.to_string())
+        .collect();
+    *query = tokens.join(" ");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_token_helpers() {
+        let mut q = "meeting is:unread".to_string();
+        assert!(has_search_token(&q, "is:unread"));
+        assert!(!has_search_token(&q, "is:starred"));
+
+        toggle_search_token(&mut q, "is:starred");
+        assert!(has_search_token(&q, "is:starred"));
+        assert_eq!(q, "meeting is:unread is:starred");
+
+        toggle_search_token(&mut q, "is:unread");
+        assert!(!has_search_token(&q, "is:unread"));
+        assert_eq!(q, "meeting is:starred");
+
+        clear_search_filter_tokens(&mut q);
+        assert_eq!(q, "meeting");
+    }
+}
+

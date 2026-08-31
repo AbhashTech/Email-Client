@@ -9,6 +9,50 @@ use rusqlite::params;
 use std::collections::HashMap;
 use std::path::Path;
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ParsedSearchQuery {
+    pub from: Vec<String>,
+    pub to: Vec<String>,
+    pub subject: Vec<String>,
+    pub is_unread: Option<bool>,
+    pub is_flagged: Option<bool>,
+    pub has_attachment: bool,
+    pub free_text: Vec<String>,
+}
+
+pub fn parse_search_query(raw: &str) -> ParsedSearchQuery {
+    let mut parsed = ParsedSearchQuery::default();
+    let tokens = raw.split_whitespace();
+
+    for token in tokens {
+        if let Some(rest) = token.strip_prefix("from:") {
+            if !rest.is_empty() {
+                parsed.from.push(rest.to_lowercase());
+            }
+        } else if let Some(rest) = token.strip_prefix("to:") {
+            if !rest.is_empty() {
+                parsed.to.push(rest.to_lowercase());
+            }
+        } else if let Some(rest) = token.strip_prefix("subject:") {
+            if !rest.is_empty() {
+                parsed.subject.push(rest.to_lowercase());
+            }
+        } else if token.eq_ignore_ascii_case("is:unread") {
+            parsed.is_unread = Some(true);
+        } else if token.eq_ignore_ascii_case("is:read") {
+            parsed.is_unread = Some(false);
+        } else if token.eq_ignore_ascii_case("is:starred") || token.eq_ignore_ascii_case("is:flagged") {
+            parsed.is_flagged = Some(true);
+        } else if token.eq_ignore_ascii_case("has:attachment") || token.eq_ignore_ascii_case("has:attachments") {
+            parsed.has_attachment = true;
+        } else {
+            parsed.free_text.push(token.to_string());
+        }
+    }
+
+    parsed
+}
+
 #[derive(Clone)]
 pub struct Storage {
     pool: Pool<SqliteConnectionManager>,
@@ -504,11 +548,52 @@ impl Storage {
 
         if let Some(search) = search_query {
             if !search.trim().is_empty() {
-                query.push_str(" AND (subject LIKE ? OR from_address LIKE ? OR snippet LIKE ?)");
-                let pattern = format!("%{}%", search.trim());
-                params_vec.push(Box::new(pattern.clone()));
-                params_vec.push(Box::new(pattern.clone()));
-                params_vec.push(Box::new(pattern));
+                let parsed = parse_search_query(search);
+
+                for f in &parsed.from {
+                    query.push_str(" AND (lower(from_address) LIKE ? OR lower(from_name) LIKE ?)");
+                    let pattern = format!("%{}%", f);
+                    params_vec.push(Box::new(pattern.clone()));
+                    params_vec.push(Box::new(pattern));
+                }
+
+                for t in &parsed.to {
+                    query.push_str(" AND lower(to_recipients_json) LIKE ?");
+                    params_vec.push(Box::new(format!("%{}%", t)));
+                }
+
+                for s in &parsed.subject {
+                    query.push_str(" AND lower(subject) LIKE ?");
+                    params_vec.push(Box::new(format!("%{}%", s)));
+                }
+
+                if let Some(unread) = parsed.is_unread {
+                    if unread {
+                        query.push_str(" AND is_read = 0");
+                    } else {
+                        query.push_str(" AND is_read = 1");
+                    }
+                }
+
+                if let Some(flagged) = parsed.is_flagged {
+                    if flagged {
+                        query.push_str(" AND is_flagged = 1");
+                    }
+                }
+
+                if parsed.has_attachment {
+                    query.push_str(" AND id IN (SELECT DISTINCT message_id FROM attachments WHERE is_inline = 0 OR size_bytes > 0)");
+                }
+
+                if !parsed.free_text.is_empty() {
+                    let combined = parsed.free_text.join(" ");
+                    query.push_str(" AND (lower(subject) LIKE ? OR lower(from_address) LIKE ? OR lower(from_name) LIKE ? OR lower(snippet) LIKE ?)");
+                    let pattern = format!("%{}%", combined.to_lowercase());
+                    params_vec.push(Box::new(pattern.clone()));
+                    params_vec.push(Box::new(pattern.clone()));
+                    params_vec.push(Box::new(pattern.clone()));
+                    params_vec.push(Box::new(pattern));
+                }
             }
         }
 
@@ -1043,5 +1128,18 @@ mod tests {
         let msgs_folder2 = storage.get_messages(Some(&account.id), Some(&folder2.id), 10, 0, None).unwrap();
         assert!(msgs_folder2.iter().any(|m| m.id == "msg-456"));
     }
+
+    #[test]
+    fn test_parse_search_query_tokens() {
+        let q = parse_search_query("from:alice@example.com to:team subject:launch is:unread is:starred has:attachment important update");
+        assert_eq!(q.from, vec!["alice@example.com"]);
+        assert_eq!(q.to, vec!["team"]);
+        assert_eq!(q.subject, vec!["launch"]);
+        assert_eq!(q.is_unread, Some(true));
+        assert_eq!(q.is_flagged, Some(true));
+        assert!(q.has_attachment);
+        assert_eq!(q.free_text, vec!["important", "update"]);
+    }
 }
+
 
