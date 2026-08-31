@@ -28,13 +28,18 @@ pub struct SettingsView {
     pub is_open: bool,
     pub active_tab: SettingsTab,
 
-    // Template Creator
+    // Template Creator / Editor
+    pub editing_tpl_id: Option<String>,
+    pub editing_tpl_created_at: Option<i64>,
     pub new_tpl_name: String,
     pub new_tpl_subject: String,
     pub new_tpl_body: String,
     pub new_tpl_shortcut: String,
 
-    // Signature Creator
+    // Signature Creator / Editor
+    pub editing_sig_id: Option<String>,
+    pub editing_sig_account_id: Option<String>,
+    pub editing_sig_created_at: Option<i64>,
     pub new_sig_name: String,
     pub new_sig_html: String,
     pub new_sig_is_default: bool,
@@ -66,10 +71,15 @@ impl SettingsView {
         Self {
             is_open: false,
             active_tab: SettingsTab::Accounts,
+            editing_tpl_id: None,
+            editing_tpl_created_at: None,
             new_tpl_name: String::new(),
             new_tpl_subject: String::new(),
             new_tpl_body: String::new(),
             new_tpl_shortcut: String::new(),
+            editing_sig_id: None,
+            editing_sig_account_id: None,
+            editing_sig_created_at: None,
             new_sig_name: String::new(),
             new_sig_html: "<b>Best regards,</b><br/>My Name".to_string(),
             new_sig_is_default: false,
@@ -91,6 +101,24 @@ impl SettingsView {
             custom_themes: Vec::new(),
             status_msg: None,
         }
+    }
+
+    pub fn reset_sig_form(&mut self) {
+        self.editing_sig_id = None;
+        self.editing_sig_account_id = None;
+        self.editing_sig_created_at = None;
+        self.new_sig_name.clear();
+        self.new_sig_html = "<b>Best regards,</b><br/>My Name".to_string();
+        self.new_sig_is_default = false;
+    }
+
+    pub fn reset_tpl_form(&mut self) {
+        self.editing_tpl_id = None;
+        self.editing_tpl_created_at = None;
+        self.new_tpl_name.clear();
+        self.new_tpl_subject.clear();
+        self.new_tpl_body.clear();
+        self.new_tpl_shortcut.clear();
     }
 
     pub fn open(&mut self) {
@@ -376,7 +404,19 @@ impl SettingsView {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
                             let _ = storage.delete_signature(&sig.id);
+                            if self.editing_sig_id.as_deref() == Some(&sig.id) {
+                                self.reset_sig_form();
+                            }
                             *on_data_changed = true;
+                        }
+                        if ui.button(RichText::new("✏ Edit").size(11.0)).clicked() {
+                            self.editing_sig_id = Some(sig.id.clone());
+                            self.editing_sig_account_id = sig.account_id.clone();
+                            self.editing_sig_created_at = Some(sig.created_at);
+                            self.new_sig_name = sig.name.clone();
+                            self.new_sig_html = sig.content_html.clone();
+                            self.new_sig_is_default = sig.is_default;
+                            self.status_msg = Some((true, format!("Editing signature: {}", sig.name)));
                         }
                     });
                 });
@@ -386,7 +426,12 @@ impl SettingsView {
         }
 
         ui.add_space(14.0);
-        ui.label(RichText::new("CREATE NEW SIGNATURE").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        let sig_heading = if let Some(ref edit_id) = self.editing_sig_id {
+            format!("EDIT SIGNATURE (Editing ID: {})", &edit_id[..8.min(edit_id.len())])
+        } else {
+            "CREATE NEW SIGNATURE".to_string()
+        };
+        ui.label(RichText::new(sig_heading).size(11.0).strong().color(if self.editing_sig_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_MUTED }));
         ui.add_space(6.0);
 
         egui::Grid::new("new_signature_grid")
@@ -407,23 +452,61 @@ impl SettingsView {
             });
 
         ui.add_space(8.0);
-        if ui.button("💾 Save Signature").clicked() {
-            if self.new_sig_name.trim().is_empty() {
-                self.status_msg = Some((false, "Signature name cannot be empty.".to_string()));
+        ui.horizontal(|ui| {
+            let save_btn_label = if self.editing_sig_id.is_some() {
+                "💾 Update Signature"
             } else {
-                let sanitized_html = email_html::sanitize_raw_html(&self.new_sig_html);
-                let sig = Signature::new(
-                    accounts.first().map(|a| a.id.clone()),
-                    self.new_sig_name.clone(),
-                    sanitized_html,
-                    self.new_sig_is_default,
-                );
-                let _ = storage.save_signature(&sig);
-                self.new_sig_name.clear();
-                self.status_msg = Some((true, "Signature saved successfully.".to_string()));
-                *on_data_changed = true;
+                "💾 Save Signature"
+            };
+
+            let btn = egui::Button::new(RichText::new(save_btn_label).strong())
+                .fill(if self.editing_sig_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD });
+
+            if ui.add(btn).clicked() {
+                if self.new_sig_name.trim().is_empty() {
+                    self.status_msg = Some((false, "Signature name cannot be empty.".to_string()));
+                } else {
+                    let sanitized_html = email_html::sanitize_raw_html(&self.new_sig_html);
+                    let is_editing = self.editing_sig_id.is_some();
+                    let sig = if let Some(ref edit_id) = self.editing_sig_id {
+                        Signature {
+                            id: edit_id.clone(),
+                            account_id: self.editing_sig_account_id.clone().or_else(|| accounts.first().map(|a| a.id.clone())),
+                            name: self.new_sig_name.clone(),
+                            content_html: sanitized_html,
+                            is_default: self.new_sig_is_default,
+                            created_at: self.editing_sig_created_at.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+                        }
+                    } else {
+                        Signature::new(
+                            accounts.first().map(|a| a.id.clone()),
+                            self.new_sig_name.clone(),
+                            sanitized_html,
+                            self.new_sig_is_default,
+                        )
+                    };
+
+                    let _ = storage.save_signature(&sig);
+                    self.reset_sig_form();
+                    self.status_msg = Some((
+                        true,
+                        if is_editing {
+                            "Signature updated successfully.".to_string()
+                        } else {
+                            "Signature saved successfully.".to_string()
+                        },
+                    ));
+                    *on_data_changed = true;
+                }
             }
-        }
+
+            if self.editing_sig_id.is_some() {
+                if ui.button("Cancel").clicked() {
+                    self.reset_sig_form();
+                    self.status_msg = None;
+                }
+            }
+        });
     }
 
     fn show_templates_tab(
@@ -448,7 +531,19 @@ impl SettingsView {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("🗑 Delete").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
                             let _ = storage.delete_template(&tpl.id);
+                            if self.editing_tpl_id.as_deref() == Some(&tpl.id) {
+                                self.reset_tpl_form();
+                            }
                             *on_data_changed = true;
+                        }
+                        if ui.button(RichText::new("✏ Edit").size(11.0)).clicked() {
+                            self.editing_tpl_id = Some(tpl.id.clone());
+                            self.editing_tpl_created_at = Some(tpl.created_at);
+                            self.new_tpl_name = tpl.name.clone();
+                            self.new_tpl_shortcut = tpl.shortcut.clone().unwrap_or_default();
+                            self.new_tpl_subject = tpl.subject_template.clone();
+                            self.new_tpl_body = tpl.body_template.clone();
+                            self.status_msg = Some((true, format!("Editing template: {}", tpl.name)));
                         }
                     });
                 });
@@ -458,7 +553,12 @@ impl SettingsView {
         }
 
         ui.add_space(14.0);
-        ui.label(RichText::new("CREATE NEW TEMPLATE").size(11.0).strong().color(AppTheme::TEXT_MUTED));
+        let tpl_heading = if let Some(ref edit_id) = self.editing_tpl_id {
+            format!("EDIT TEMPLATE (Editing ID: {})", &edit_id[..8.min(edit_id.len())])
+        } else {
+            "CREATE NEW TEMPLATE".to_string()
+        };
+        ui.label(RichText::new(tpl_heading).size(11.0).strong().color(if self.editing_tpl_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::TEXT_MUTED }));
         ui.add_space(6.0);
 
         egui::Grid::new("new_tpl_grid")
@@ -483,30 +583,66 @@ impl SettingsView {
             });
 
         ui.add_space(8.0);
-        if ui.button("💾 Save Template").clicked() {
-            if self.new_tpl_name.trim().is_empty() {
-                self.status_msg = Some((false, "Template name cannot be empty.".to_string()));
+        ui.horizontal(|ui| {
+            let save_btn_label = if self.editing_tpl_id.is_some() {
+                "💾 Update Template"
             } else {
-                let shortcut = if self.new_tpl_shortcut.is_empty() {
-                    None
+                "💾 Save Template"
+            };
+
+            let btn = egui::Button::new(RichText::new(save_btn_label).strong())
+                .fill(if self.editing_tpl_id.is_some() { AppTheme::ACCENT_PRIMARY } else { AppTheme::BG_CARD });
+
+            if ui.add(btn).clicked() {
+                if self.new_tpl_name.trim().is_empty() {
+                    self.status_msg = Some((false, "Template name cannot be empty.".to_string()));
                 } else {
-                    Some(self.new_tpl_shortcut.clone())
-                };
-                let tpl = Template::new(
-                    self.new_tpl_name.clone(),
-                    self.new_tpl_subject.clone(),
-                    self.new_tpl_body.clone(),
-                    shortcut,
-                );
-                let _ = storage.save_template(&tpl);
-                self.new_tpl_name.clear();
-                self.new_tpl_subject.clear();
-                self.new_tpl_body.clear();
-                self.new_tpl_shortcut.clear();
-                self.status_msg = Some((true, "Template saved successfully.".to_string()));
-                *on_data_changed = true;
+                    let shortcut = if self.new_tpl_shortcut.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.new_tpl_shortcut.trim().to_string())
+                    };
+
+                    let is_editing = self.editing_tpl_id.is_some();
+                    let tpl = if let Some(ref edit_id) = self.editing_tpl_id {
+                        Template {
+                            id: edit_id.clone(),
+                            name: self.new_tpl_name.clone(),
+                            subject_template: self.new_tpl_subject.clone(),
+                            body_template: self.new_tpl_body.clone(),
+                            shortcut,
+                            created_at: self.editing_tpl_created_at.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+                        }
+                    } else {
+                        Template::new(
+                            self.new_tpl_name.clone(),
+                            self.new_tpl_subject.clone(),
+                            self.new_tpl_body.clone(),
+                            shortcut,
+                        )
+                    };
+
+                    let _ = storage.save_template(&tpl);
+                    self.reset_tpl_form();
+                    self.status_msg = Some((
+                        true,
+                        if is_editing {
+                            "Template updated successfully.".to_string()
+                        } else {
+                            "Template saved successfully.".to_string()
+                        },
+                    ));
+                    *on_data_changed = true;
+                }
             }
-        }
+
+            if self.editing_tpl_id.is_some() {
+                if ui.button("Cancel").clicked() {
+                    self.reset_tpl_form();
+                    self.status_msg = None;
+                }
+            }
+        });
     }
 
     fn show_appearance_tab(
@@ -1105,5 +1241,41 @@ mod tests {
         delete_custom_theme(&test_theme.id).expect("Delete test theme");
         let all_after = load_custom_themes();
         assert!(!all_after.iter().any(|t| t.id == test_theme.id));
+    }
+
+    #[test]
+    fn test_signature_and_template_editing_state() {
+        let mut settings = SettingsView::new();
+
+        // Signature Edit State
+        settings.editing_sig_id = Some("sig_42".to_string());
+        settings.new_sig_name = "Work Signature".to_string();
+        settings.new_sig_html = "<b>Best,</b> Alex".to_string();
+        settings.new_sig_is_default = true;
+
+        assert_eq!(settings.editing_sig_id.as_deref(), Some("sig_42"));
+        assert_eq!(settings.new_sig_name, "Work Signature");
+
+        settings.reset_sig_form();
+        assert!(settings.editing_sig_id.is_none());
+        assert!(settings.new_sig_name.is_empty());
+        assert!(!settings.new_sig_is_default);
+
+        // Template Edit State
+        settings.editing_tpl_id = Some("tpl_99".to_string());
+        settings.new_tpl_name = "Status Update".to_string();
+        settings.new_tpl_subject = "Weekly Progress".to_string();
+        settings.new_tpl_body = "Hi team, here is the update...".to_string();
+        settings.new_tpl_shortcut = "/status".to_string();
+
+        assert_eq!(settings.editing_tpl_id.as_deref(), Some("tpl_99"));
+        assert_eq!(settings.new_tpl_name, "Status Update");
+
+        settings.reset_tpl_form();
+        assert!(settings.editing_tpl_id.is_none());
+        assert!(settings.new_tpl_name.is_empty());
+        assert!(settings.new_tpl_subject.is_empty());
+        assert!(settings.new_tpl_body.is_empty());
+        assert!(settings.new_tpl_shortcut.is_empty());
     }
 }
