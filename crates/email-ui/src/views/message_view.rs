@@ -43,23 +43,21 @@ impl MessageViewPane {
 
         // 1. Action Toolbar
         ui.add_space(4.0);
-        ui.with_layout(
-            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
-            |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-                ui.spacing_mut().button_padding = Vec2::new(8.0, 5.0);
-                if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
-                    *on_reply = Some(detail.clone());
-                }
-                if ui.button(RichText::new("📝 Text Reply").size(12.0)).on_hover_text("Reply in plain text format only").clicked() {
-                    *on_reply_plain = Some(detail.clone());
-                }
-                if ui.button(RichText::new("👥 Reply All").size(12.0)).on_hover_text("Reply to all recipients").clicked() {
-                    *on_reply_all = Some(detail.clone());
-                }
-                if ui.button(RichText::new("➡ Forward").size(12.0)).on_hover_text("Forward message").clicked() {
-                    *on_forward = Some(detail.clone());
-                }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+            ui.spacing_mut().button_padding = Vec2::new(8.0, 4.5);
+            if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
+                *on_reply = Some(detail.clone());
+            }
+            if ui.button(RichText::new("📝 Text Reply").size(12.0)).on_hover_text("Reply in plain text format only").clicked() {
+                *on_reply_plain = Some(detail.clone());
+            }
+            if ui.button(RichText::new("👥 Reply All").size(12.0)).on_hover_text("Reply to all recipients").clicked() {
+                *on_reply_all = Some(detail.clone());
+            }
+            if ui.button(RichText::new("➡ Forward").size(12.0)).on_hover_text("Forward message").clicked() {
+                *on_forward = Some(detail.clone());
+            }
 
             let read_label = if msg.is_read { "✉ Unread" } else { "✉ Read" };
             if ui.button(RichText::new(read_label).size(12.0)).clicked() {
@@ -165,13 +163,9 @@ impl MessageViewPane {
             }
         });
 
+        ui.add_space(4.0);
+        ui.separator();
         ui.add_space(6.0);
-        ui.painter().hline(
-            ui.available_rect_before_wrap().x_range(),
-            ui.cursor().top(),
-            Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE),
-        );
-        ui.add_space(10.0);
 
         let avail_width = ui.available_width();
         let avail_height = ui.available_height();

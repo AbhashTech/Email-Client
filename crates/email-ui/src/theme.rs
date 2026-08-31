@@ -126,6 +126,70 @@ pub fn delete_custom_theme(theme_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn detect_system_theme(ctx: &egui::Context) -> egui::Theme {
+    // 1. Try egui native window system theme query
+    if let Some(st) = ctx.input(|i| i.raw.system_theme) {
+        return st;
+    }
+
+    // 2. Linux GNOME / Freedesktop Portal / XDG gsettings check
+    #[cfg(target_os = "linux")]
+    {
+        // Check standard freedesktop color-scheme via gsettings
+        if let Ok(output) = std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            if s.contains("prefer-light") {
+                return egui::Theme::Light;
+            } else if s.contains("prefer-dark") {
+                return egui::Theme::Dark;
+            }
+        }
+
+        // Check GTK theme name
+        if let Ok(output) = std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            if s.contains("dark") {
+                return egui::Theme::Dark;
+            } else if s.contains("light") {
+                return egui::Theme::Light;
+            }
+        }
+
+        if let Ok(gtk_theme) = std::env::var("GTK_THEME") {
+            let s = gtk_theme.to_lowercase();
+            if s.contains("dark") {
+                return egui::Theme::Dark;
+            } else if s.contains("light") {
+                return egui::Theme::Light;
+            }
+        }
+    }
+
+    // 3. macOS AppleInterfaceStyle check
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleInterfaceStyle"])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&output.stdout);
+            if s.trim().eq_ignore_ascii_case("dark") {
+                return egui::Theme::Dark;
+            } else {
+                return egui::Theme::Light;
+            }
+        }
+    }
+
+    egui::Theme::Dark
+}
+
 pub struct AppTheme;
 
 #[allow(dead_code)]
@@ -159,10 +223,8 @@ impl AppTheme {
 
     pub fn apply_preset(ctx: &egui::Context, preset: ThemePreset) {
         let active_preset = if preset == ThemePreset::GruvboxAuto {
-            let is_system_light = ctx.input(|i| {
-                i.raw.system_theme == Some(egui::Theme::Light)
-            });
-            if is_system_light {
+            let sys_theme = detect_system_theme(ctx);
+            if sys_theme == egui::Theme::Light {
                 ThemePreset::GruvboxLight
             } else {
                 ThemePreset::GruvboxDark

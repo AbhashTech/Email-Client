@@ -563,6 +563,10 @@ impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_events();
 
+        if self.current_theme == crate::theme::ThemePreset::GruvboxAuto {
+            AppTheme::apply_preset(ctx, crate::theme::ThemePreset::GruvboxAuto);
+        }
+
         // Handle Ctrl+, / Cmd+, shortcut to open Settings
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
             self.settings_view.open();
