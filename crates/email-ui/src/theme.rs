@@ -160,12 +160,39 @@ pub fn delete_custom_theme(theme_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
+
+static LAST_SYSTEM_THEME_CHECK: AtomicI64 = AtomicI64::new(0);
+static CACHED_SYSTEM_THEME: AtomicU8 = AtomicU8::new(0); // 0: Dark, 1: Light
+
 pub fn detect_system_theme(ctx: &egui::Context) -> egui::Theme {
-    // 1. Try egui native window system theme query
+    // 1. Try egui native window system theme query (instant zero-cost memory read)
     if let Some(st) = ctx.input(|i| i.raw.system_theme) {
         return st;
     }
 
+    // Throttle external CLI execution to at most once every 5 seconds
+    let now = chrono::Utc::now().timestamp();
+    let last = LAST_SYSTEM_THEME_CHECK.load(Ordering::Relaxed);
+    if now - last < 5 && last > 0 {
+        return if CACHED_SYSTEM_THEME.load(Ordering::Relaxed) == 1 {
+            egui::Theme::Light
+        } else {
+            egui::Theme::Dark
+        };
+    }
+
+    LAST_SYSTEM_THEME_CHECK.store(now, Ordering::Relaxed);
+
+    let detected = detect_system_theme_uncached();
+    CACHED_SYSTEM_THEME.store(
+        if detected == egui::Theme::Light { 1 } else { 0 },
+        Ordering::Relaxed,
+    );
+    detected
+}
+
+fn detect_system_theme_uncached() -> egui::Theme {
     // 2. Linux GNOME / Freedesktop Portal / XDG gsettings check
     #[cfg(target_os = "linux")]
     {

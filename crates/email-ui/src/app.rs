@@ -58,6 +58,7 @@ pub struct EmailApp {
     scheduled_count: usize,
     outbox_count: usize,
     show_scheduled_modal: bool,
+    last_applied_system_theme: Option<egui::Theme>,
 
     // Sub-views
     account_setup_view: AccountSetupView,
@@ -135,6 +136,7 @@ impl EmailApp {
             scheduled_count: 0,
             outbox_count: 0,
             show_scheduled_modal: false,
+            last_applied_system_theme: None,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
             settings_view,
@@ -812,7 +814,11 @@ impl App for EmailApp {
         if self.current_theme == crate::theme::ThemePreset::SystemAuto
             || self.current_theme == crate::theme::ThemePreset::GruvboxAuto
         {
-            AppTheme::apply_preset(ctx, self.current_theme);
+            let current_detected = crate::theme::detect_system_theme(ctx);
+            if self.last_applied_system_theme != Some(current_detected) {
+                self.last_applied_system_theme = Some(current_detected);
+                AppTheme::apply_preset(ctx, self.current_theme);
+            }
         }
 
         // Handle Ctrl+, / Cmd+, shortcut to open Settings
