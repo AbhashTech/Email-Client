@@ -322,8 +322,9 @@ impl MessageListView {
                         ui.painter().rect_filled(indicator, Rounding::same(2.0), AppTheme::ACCENT_PRIMARY);
                     }
 
-                    // Child UI layout
+                    // Child UI layout with hard boundary clipping
                     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    child_ui.set_clip_rect(rect);
                     child_ui.horizontal(|ui| {
                         ui.add_space(8.0);
 
@@ -391,25 +392,15 @@ impl MessageListView {
                         ui.add_space(6.0);
 
                         // 4. Message Content Columns
+                        let content_avail_width = (ui.available_width() - 8.0).max(60.0);
                         ui.vertical(|ui| {
+                            ui.set_max_width(content_avail_width);
                             ui.add_space(6.0);
 
                             // Row 1: Sender Name + Star + Date
                             ui.horizontal(|ui| {
-                                let sender_color = if !msg.is_read {
-                                    AppTheme::TEXT_PRIMARY
-                                } else {
-                                    AppTheme::TEXT_SECONDARY
-                                };
-                                let sender_style = if !msg.is_read {
-                                    RichText::new(msg.sender_display()).strong().size(13.0).color(sender_color)
-                                } else {
-                                    RichText::new(msg.sender_display()).size(13.0).color(sender_color)
-                                };
-                                ui.label(sender_style);
-
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.add_space(8.0);
+                                    ui.add_space(4.0);
                                     ui.label(
                                         RichText::new(msg.formatted_date())
                                             .size(11.0)
@@ -430,18 +421,31 @@ impl MessageListView {
                                     if star_btn.hovered() {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
+
+                                    // Left: Sender Name (strictly single-line with ellipsis)
+                                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                        let sender_color = if !msg.is_read {
+                                            AppTheme::TEXT_PRIMARY
+                                        } else {
+                                            AppTheme::TEXT_SECONDARY
+                                        };
+                                        let sender_style = if !msg.is_read {
+                                            RichText::new(msg.sender_display()).strong().size(13.0).color(sender_color)
+                                        } else {
+                                            RichText::new(msg.sender_display()).size(13.0).color(sender_color)
+                                        };
+                                        ui.add(egui::Label::new(sender_style).truncate());
+                                    });
                                 });
                             });
 
-                            ui.add_space(1.0);
+                            ui.add_space(2.0);
 
-                            // Row 2: Subject Line
-                            let truncated_subj = if msg.subject.is_empty() {
+                            // Row 2: Subject Line (strictly single-line with ellipsis)
+                            let subject_display = if msg.subject.trim().is_empty() {
                                 "(No Subject)".to_string()
-                            } else if msg.subject.len() > 65 {
-                                format!("{}...", &msg.subject[..62])
                             } else {
-                                msg.subject.clone()
+                                msg.subject.replace('\n', " ").replace('\r', " ")
                             };
 
                             let subj_color = if is_active_view || is_in_selection {
@@ -453,24 +457,23 @@ impl MessageListView {
                             };
 
                             let subj_style = if !msg.is_read {
-                                RichText::new(truncated_subj).strong().size(12.0).color(subj_color)
+                                RichText::new(subject_display).strong().size(12.0).color(subj_color)
                             } else {
-                                RichText::new(truncated_subj).size(12.0).color(subj_color)
+                                RichText::new(subject_display).size(12.0).color(subj_color)
                             };
-                            ui.label(subj_style);
+                            ui.add(egui::Label::new(subj_style).truncate());
 
-                            ui.add_space(1.0);
+                            ui.add_space(2.0);
 
-                            // Row 3: Snippet Preview
-                            let snippet_text = if msg.snippet.len() > 75 {
-                                format!("{}...", &msg.snippet[..72])
-                            } else {
-                                msg.snippet.clone()
-                            };
-                            ui.label(
-                                RichText::new(snippet_text)
-                                    .size(11.0)
-                                    .color(AppTheme::TEXT_MUTED),
+                            // Row 3: Snippet Preview (strictly single-line with ellipsis)
+                            let snippet_display = msg.snippet.replace('\n', " ").replace('\r', " ");
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(snippet_display)
+                                        .size(11.0)
+                                        .color(AppTheme::TEXT_MUTED),
+                                )
+                                .truncate(),
                             );
 
                             ui.add_space(4.0);
