@@ -21,6 +21,7 @@ pub struct AccountSetupView {
     pub smtp_port: u16,
     pub smtp_security: SecurityType,
     pub sync_window: SyncWindow,
+    pub custom_sync_days: i64,
 
     // Discovered folders for selective sync
     pub discovered_folders: Vec<Folder>,
@@ -43,6 +44,7 @@ impl AccountSetupView {
             smtp_port: 465,
             smtp_security: SecurityType::Tls,
             sync_window: SyncWindow::Days30,
+            custom_sync_days: 45,
             discovered_folders: Vec::new(),
             test_status_msg: None,
             is_testing: false,
@@ -62,6 +64,7 @@ impl AccountSetupView {
         self.smtp_port = 465;
         self.smtp_security = SecurityType::Tls;
         self.sync_window = SyncWindow::Days30;
+        self.custom_sync_days = 45;
         self.discovered_folders.clear();
         self.test_status_msg = None;
         self.is_testing = false;
@@ -80,6 +83,11 @@ impl AccountSetupView {
         self.smtp_port = account.smtp_port;
         self.smtp_security = account.smtp_security;
         self.sync_window = account.sync_days_window;
+        if let SyncWindow::Custom(d) = account.sync_days_window {
+            self.custom_sync_days = d;
+        } else {
+            self.custom_sync_days = 45;
+        }
         self.discovered_folders.clear();
         self.test_status_msg = None;
         self.is_testing = false;
@@ -225,15 +233,49 @@ impl AccountSetupView {
                         ui.end_row();
 
                         ui.label(RichText::new("Sync Window:").size(12.5).color(AppTheme::TEXT_SECONDARY));
-                        egui::ComboBox::from_id_salt("sync_window_combo")
-                            .selected_text(self.sync_window.label())
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.sync_window, SyncWindow::Days7, SyncWindow::Days7.label());
-                                ui.selectable_value(&mut self.sync_window, SyncWindow::Days30, SyncWindow::Days30.label());
-                                ui.selectable_value(&mut self.sync_window, SyncWindow::Days90, SyncWindow::Days90.label());
-                                ui.selectable_value(&mut self.sync_window, SyncWindow::Days365, SyncWindow::Days365.label());
-                                ui.selectable_value(&mut self.sync_window, SyncWindow::All, SyncWindow::All.label());
-                            });
+                        ui.horizontal(|ui| {
+                            let is_custom = matches!(self.sync_window, SyncWindow::Custom(_));
+                            let selected_text = self.sync_window.label();
+
+                            egui::ComboBox::from_id_salt("sync_window_combo")
+                                .selected_text(selected_text)
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days7, SyncWindow::Days7.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days7;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days14, SyncWindow::Days14.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days14;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days30, SyncWindow::Days30.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days30;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days45, SyncWindow::Days45.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days45;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days60, SyncWindow::Days60.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days60;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days90, SyncWindow::Days90.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days90;
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::Days365, SyncWindow::Days365.label()).clicked() {
+                                        self.sync_window = SyncWindow::Days365;
+                                    }
+                                    if ui.selectable_label(is_custom, "Custom Days...").clicked() {
+                                        self.sync_window = SyncWindow::Custom(self.custom_sync_days);
+                                    }
+                                    if ui.selectable_label(self.sync_window == SyncWindow::All, SyncWindow::All.label()).clicked() {
+                                        self.sync_window = SyncWindow::All;
+                                    }
+                                });
+
+                            if is_custom {
+                                ui.add_space(6.0);
+                                if ui.add(egui::DragValue::new(&mut self.custom_sync_days).range(1..=3650).speed(1).suffix(" days")).changed() {
+                                    self.sync_window = SyncWindow::Custom(self.custom_sync_days);
+                                }
+                            }
+                        });
                         ui.end_row();
                     });
 

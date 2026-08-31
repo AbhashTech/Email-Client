@@ -64,9 +64,13 @@ impl AuthType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SyncWindow {
     Days7,
+    Days14,
     Days30,
+    Days45,
+    Days60,
     Days90,
     Days365,
+    Custom(i64),
     All,
 }
 
@@ -80,30 +84,43 @@ impl SyncWindow {
     pub fn days(&self) -> Option<i64> {
         match self {
             SyncWindow::Days7 => Some(7),
+            SyncWindow::Days14 => Some(14),
             SyncWindow::Days30 => Some(30),
+            SyncWindow::Days45 => Some(45),
+            SyncWindow::Days60 => Some(60),
             SyncWindow::Days90 => Some(90),
             SyncWindow::Days365 => Some(365),
+            SyncWindow::Custom(d) => Some((*d).max(1)),
             SyncWindow::All => None,
         }
     }
 
     pub fn from_days(days: i64) -> Self {
         match days {
+            0 => SyncWindow::All,
             7 => SyncWindow::Days7,
+            14 => SyncWindow::Days14,
             30 => SyncWindow::Days30,
+            45 => SyncWindow::Days45,
+            60 => SyncWindow::Days60,
             90 => SyncWindow::Days90,
             365 => SyncWindow::Days365,
+            d if d > 0 => SyncWindow::Custom(d),
             _ => SyncWindow::All,
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            SyncWindow::Days7 => "Last 7 Days",
-            SyncWindow::Days30 => "Last 30 Days",
-            SyncWindow::Days90 => "Last 90 Days",
-            SyncWindow::Days365 => "Last 1 Year",
-            SyncWindow::All => "All History",
+            SyncWindow::Days7 => "Last 7 Days (1 Week)".to_string(),
+            SyncWindow::Days14 => "Last 14 Days (2 Weeks)".to_string(),
+            SyncWindow::Days30 => "Last 30 Days (1 Month)".to_string(),
+            SyncWindow::Days45 => "Last 45 Days (1.5 Months)".to_string(),
+            SyncWindow::Days60 => "Last 60 Days (2 Months)".to_string(),
+            SyncWindow::Days90 => "Last 90 Days (3 Months / Quarter)".to_string(),
+            SyncWindow::Days365 => "Last 365 Days (1 Year)".to_string(),
+            SyncWindow::Custom(d) => format!("Custom ({} Days)", d),
+            SyncWindow::All => "All History (Everything)".to_string(),
         }
     }
 
@@ -380,6 +397,38 @@ impl Signature {
             is_default,
             created_at: Utc::now().timestamp(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_window_all_options() {
+        assert_eq!(SyncWindow::from_days(7), SyncWindow::Days7);
+        assert_eq!(SyncWindow::from_days(14), SyncWindow::Days14);
+        assert_eq!(SyncWindow::from_days(30), SyncWindow::Days30);
+        assert_eq!(SyncWindow::from_days(45), SyncWindow::Days45);
+        assert_eq!(SyncWindow::from_days(60), SyncWindow::Days60);
+        assert_eq!(SyncWindow::from_days(90), SyncWindow::Days90);
+        assert_eq!(SyncWindow::from_days(365), SyncWindow::Days365);
+        assert_eq!(SyncWindow::from_days(120), SyncWindow::Custom(120));
+        assert_eq!(SyncWindow::from_days(0), SyncWindow::All);
+
+        assert_eq!(SyncWindow::Days7.days(), Some(7));
+        assert_eq!(SyncWindow::Days14.days(), Some(14));
+        assert_eq!(SyncWindow::Days30.days(), Some(30));
+        assert_eq!(SyncWindow::Days45.days(), Some(45));
+        assert_eq!(SyncWindow::Days60.days(), Some(60));
+        assert_eq!(SyncWindow::Days90.days(), Some(90));
+        assert_eq!(SyncWindow::Days365.days(), Some(365));
+        assert_eq!(SyncWindow::Custom(50).days(), Some(50));
+        assert_eq!(SyncWindow::All.days(), None);
+
+        assert!(SyncWindow::Days45.calculate_since_date().is_some());
+        assert!(SyncWindow::Custom(60).calculate_since_date().is_some());
+        assert!(SyncWindow::All.calculate_since_date().is_none());
     }
 }
 
