@@ -2,7 +2,7 @@ use crate::theme::AppTheme;
 use crate::tray::AppTray;
 use crate::views::*;
 use eframe::App;
-use egui::{Color32, RichText, Rounding, TopBottomPanel};
+use egui::{Color32, RichText, Rounding, Stroke, TopBottomPanel};
 use email_core::events::{SyncCommand, SyncEvent};
 use email_core::models::{Account, Folder, MessageDetail, MessageHeader, OutgoingDraft, Signature, Template};
 use email_keychain::CredentialStore;
@@ -50,6 +50,8 @@ pub struct EmailApp {
     is_syncing: bool,
     show_sidebar: bool,
     show_message_list: bool,
+    last_scheduled_check: std::time::Instant,
+    show_scheduled_modal: bool,
 
     // Sub-views
     account_setup_view: AccountSetupView,
@@ -99,6 +101,8 @@ impl EmailApp {
             is_syncing: false,
             show_sidebar: true,
             show_message_list: true,
+            last_scheduled_check: std::time::Instant::now(),
+            show_scheduled_modal: false,
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
             settings_view: SettingsView::new(),
@@ -240,6 +244,35 @@ impl EmailApp {
                 SyncEvent::NewMailNotification { from, subject, .. } => {
                     self.status_text = format!("New mail from {}: {}", from, subject);
                     self.reload_data();
+                }
+            }
+        }
+
+        self.check_scheduled_queue();
+    }
+
+    pub fn check_scheduled_queue(&mut self) {
+        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(2) {
+            return;
+        }
+        self.last_scheduled_check = std::time::Instant::now();
+
+        let now_ts = chrono::Utc::now().timestamp();
+        if let Ok(due_list) = self.storage.get_due_scheduled_emails(now_ts) {
+            for item in due_list {
+                let acc_opt = self.accounts.iter().find(|a| a.id == item.account_id).cloned();
+                if let Some(acc) = acc_opt {
+                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
+                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                            draft: item.draft.clone(),
+                            password: pwd,
+                        });
+                        let _ = self.storage.delete_scheduled_email(&item.id);
+                        self.status_toast = Some((
+                            format!("✓ Transmitting scheduled email: '{}'", item.draft.subject),
+                            std::time::Instant::now(),
+                        ));
+                    }
                 }
             }
         }
@@ -599,6 +632,14 @@ impl App for EmailApp {
                     let _ = self.cmd_tx.send(SyncCommand::SyncAll);
                 }
 
+                let scheduled_count = self.storage.list_all_scheduled(None).unwrap_or_default().len();
+                if scheduled_count > 0 {
+                    let sched_text = format!("⏰ {} Scheduled", scheduled_count);
+                    if ui.button(RichText::new(sched_text).size(12.5).color(AppTheme::ACCENT_PRIMARY)).on_hover_text("View scheduled outbox queue").clicked() {
+                        self.show_scheduled_modal = true;
+                    }
+                }
+
                 if ui.button(RichText::new("⚙ Settings").size(12.5)).clicked() {
                     self.settings_view.open();
                 }
@@ -938,6 +979,7 @@ impl App for EmailApp {
         let mut on_reply_plain = None;
         let mut on_reply_all = None;
         let mut on_forward = None;
+        let mut on_edit_draft = None;
         let mut on_delete = None;
         let mut on_toggle_read_view = None;
         let mut on_move_folder = None;
@@ -963,6 +1005,7 @@ impl App for EmailApp {
                 &mut on_reply_plain,
                 &mut on_reply_all,
                 &mut on_forward,
+                &mut on_edit_draft,
                 &mut on_delete,
                 &mut on_toggle_read_view,
                 &mut on_move_folder,
@@ -1040,6 +1083,22 @@ impl App for EmailApp {
             );
         }
 
+        if let Some(detail) = on_edit_draft {
+            if let Ok(Some(local_draft)) = self.storage.get_draft(&detail.header.id) {
+                self.compose_view.open_draft(&local_draft, &self.signatures);
+            } else {
+                let to_str = detail.header.to_recipients.iter().map(|r| r.email.as_str()).collect::<Vec<_>>().join(", ");
+                let cc_str = detail.header.cc_recipients.iter().map(|r| r.email.as_str()).collect::<Vec<_>>().join(", ");
+                let body = detail.body_plain.unwrap_or_default();
+                self.compose_view.open_new(Some(&detail.header.account_id), &self.signatures);
+                self.compose_view.to_input = to_str;
+                self.compose_view.cc_input = cc_str;
+                self.compose_view.subject = detail.header.subject;
+                self.compose_view.body_plain = body;
+                self.compose_view.draft_id = Some(detail.header.id.clone());
+            }
+        }
+
         if let Some((msg_id, is_read)) = on_toggle_read_view {
             let _ = self.storage.set_message_read(&msg_id, is_read);
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
@@ -1098,6 +1157,7 @@ impl App for EmailApp {
         );
 
         let mut on_schedule_send: Option<(OutgoingDraft, String)> = None;
+        let mut on_compose_data_changed = false;
 
         self.compose_view.show(
             ctx,
@@ -1105,8 +1165,15 @@ impl App for EmailApp {
             &self.templates,
             &self.signatures,
             &self.keyring,
+            &self.storage,
             &mut on_schedule_send,
+            &mut on_compose_data_changed,
+            &mut self.status_toast,
         );
+
+        if on_compose_data_changed {
+            self.reload_data();
+        }
 
         if let Some((draft, pwd)) = on_schedule_send {
             self.pending_send = Some(PendingSend {
@@ -1115,6 +1182,58 @@ impl App for EmailApp {
                 scheduled_time: std::time::Instant::now(),
                 duration: std::time::Duration::from_secs(5),
             });
+        }
+
+        // Scheduled Outbox Modal
+        if self.show_scheduled_modal {
+            let mut modal_open = self.show_scheduled_modal;
+            egui::Window::new("⏰ Scheduled Outbox")
+                .open(&mut modal_open)
+                .default_width(550.0)
+                .show(ctx, |ui| {
+                    let scheduled_list = self.storage.list_all_scheduled(None).unwrap_or_default();
+                    if scheduled_list.is_empty() {
+                        ui.label("No scheduled emails in outbox.");
+                    } else {
+                        for item in scheduled_list {
+                            egui::Frame::none()
+                                .fill(AppTheme::BG_CARD)
+                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
+                                .rounding(Rounding::same(6.0))
+                                .inner_margin(8.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.vertical(|ui| {
+                                            let dt = chrono::DateTime::from_timestamp(item.send_at_timestamp, 0)
+                                                .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                                                .unwrap_or_default();
+                                            ui.label(RichText::new(format!("Subject: {}", item.draft.subject)).strong().color(AppTheme::TEXT_PRIMARY));
+                                            ui.label(RichText::new(format!("To: {} • Scheduled for: {}", item.draft.to.iter().map(|r| r.email.as_str()).collect::<Vec<_>>().join(", "), dt)).size(11.0).color(AppTheme::TEXT_MUTED));
+                                        });
+
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.button(RichText::new("🗑 Cancel").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
+                                                let _ = self.storage.delete_scheduled_email(&item.id);
+                                            }
+                                            if ui.button(RichText::new("🚀 Send Now").size(11.0)).clicked() {
+                                                if let Some(acc) = self.accounts.iter().find(|a| a.id == item.account_id) {
+                                                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
+                                                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                                                            draft: item.draft.clone(),
+                                                            password: pwd,
+                                                        });
+                                                        let _ = self.storage.delete_scheduled_email(&item.id);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+                            ui.add_space(4.0);
+                        }
+                    }
+                });
+            self.show_scheduled_modal = modal_open;
         }
 
         let mut on_add_account_from_settings = false;

@@ -1,7 +1,9 @@
 use crate::theme::AppTheme;
+use chrono::{Duration, Utc};
 use egui::{Color32, RichText, Rounding, Stroke, Window};
-use email_core::models::{Account, MessageHeader, OutgoingDraft, Recipient, Signature, Template};
+use email_core::models::{Account, Draft, MessageHeader, OutgoingDraft, Recipient, ScheduledEmail, Signature, Template};
 use email_keychain::CredentialStore;
+use email_storage::Storage;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub enum ComposeFormat {
 
 pub struct ComposeView {
     pub is_open: bool,
+    pub draft_id: Option<String>,
     pub selected_account_id: String,
     pub selected_signature_id: Option<String>,
     pub to_input: String,
@@ -28,6 +31,10 @@ pub struct ComposeView {
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
     pub error_msg: Option<String>,
+    pub status_msg: Option<(bool, String)>,
+    pub show_custom_schedule_dialog: bool,
+    pub custom_schedule_hours: u32,
+    pub custom_schedule_mins: u32,
 }
 
 fn find_default_signature<'a>(signatures: &'a [Signature], account_id: Option<&str>) -> Option<&'a Signature> {
@@ -58,6 +65,7 @@ impl ComposeView {
     pub fn new() -> Self {
         Self {
             is_open: false,
+            draft_id: None,
             selected_account_id: String::new(),
             selected_signature_id: None,
             to_input: String::new(),
@@ -73,11 +81,16 @@ impl ComposeView {
             in_reply_to: None,
             references: None,
             error_msg: None,
+            status_msg: None,
+            show_custom_schedule_dialog: false,
+            custom_schedule_hours: 1,
+            custom_schedule_mins: 0,
         }
     }
 
     pub fn open_new(&mut self, default_account_id: Option<&str>, signatures: &[Signature]) {
         self.is_open = true;
+        self.draft_id = None;
         self.to_input.clear();
         self.cc_input.clear();
         self.bcc_input.clear();
@@ -91,6 +104,8 @@ impl ComposeView {
         self.in_reply_to = None;
         self.references = None;
         self.error_msg = None;
+        self.status_msg = None;
+        self.show_custom_schedule_dialog = false;
         if let Some(aid) = default_account_id {
             self.selected_account_id = aid.to_string();
         }
@@ -109,6 +124,7 @@ impl ComposeView {
         send_as_html: bool,
     ) {
         self.is_open = true;
+        self.draft_id = None;
         self.selected_account_id = account_id.to_string();
         self.to_input = to.to_string();
         self.cc_input = cc.to_string();
@@ -128,10 +144,39 @@ impl ComposeView {
         self.show_markdown_preview = false;
         self.send_as_html = send_as_html;
         self.error_msg = None;
+        self.status_msg = None;
+        self.show_custom_schedule_dialog = false;
+    }
+
+    pub fn open_draft(&mut self, draft: &Draft, signatures: &[Signature]) {
+        self.is_open = true;
+        self.draft_id = Some(draft.id.clone());
+        self.selected_account_id = draft.account_id.clone();
+        self.to_input = draft.to_input.clone();
+        self.cc_input = draft.cc_input.clone();
+        self.bcc_input = draft.bcc_input.clone();
+        self.show_cc_bcc = !draft.cc_input.is_empty() || !draft.bcc_input.is_empty();
+        self.subject = draft.subject.clone();
+        self.body_plain = draft.body_plain.clone();
+        self.format = match draft.format.as_str() {
+            "html" => ComposeFormat::Html,
+            "plaintext" => ComposeFormat::PlainText,
+            _ => ComposeFormat::Markdown,
+        };
+        self.send_as_html = self.format != ComposeFormat::PlainText;
+        self.selected_signature_id = draft.signature_id.clone().or_else(|| {
+            find_default_signature(signatures, Some(&draft.account_id)).map(|s| s.id.clone())
+        });
+        self.in_reply_to = draft.in_reply_to.clone();
+        self.references = draft.references.clone();
+        self.error_msg = None;
+        self.status_msg = Some((true, "Loaded saved draft".to_string()));
+        self.show_custom_schedule_dialog = false;
     }
 
     pub fn restore_from_draft(&mut self, draft: &OutgoingDraft) {
         self.is_open = true;
+        self.draft_id = None;
         self.selected_account_id = draft.account_id.clone();
         self.to_input = draft.to.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
         self.cc_input = draft.cc.iter().map(|r| r.email.clone()).collect::<Vec<_>>().join(", ");
@@ -143,6 +188,49 @@ impl ComposeView {
         self.references = draft.references.clone();
         self.format = if draft.body_html.is_some() { ComposeFormat::Markdown } else { ComposeFormat::PlainText };
         self.error_msg = None;
+        self.status_msg = None;
+    }
+
+    pub fn save_draft_to_storage(&mut self, storage: &Storage) -> Result<String, String> {
+        if self.selected_account_id.is_empty() {
+            return Err("Please choose an account first.".to_string());
+        }
+
+        let draft_id = self.draft_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        self.draft_id = Some(draft_id.clone());
+
+        let format_str = match self.format {
+            ComposeFormat::Html => "html",
+            ComposeFormat::PlainText => "plaintext",
+            ComposeFormat::Markdown => "markdown",
+        };
+
+        let draft = Draft {
+            id: draft_id.clone(),
+            account_id: self.selected_account_id.clone(),
+            to_input: self.to_input.clone(),
+            cc_input: self.cc_input.clone(),
+            bcc_input: self.bcc_input.clone(),
+            subject: self.subject.clone(),
+            body_plain: self.body_plain.clone(),
+            format: format_str.to_string(),
+            signature_id: self.selected_signature_id.clone(),
+            in_reply_to: self.in_reply_to.clone(),
+            references: self.references.clone(),
+            updated_at: Utc::now().timestamp(),
+        };
+
+        match storage.save_draft(&draft) {
+            Ok(()) => {
+                let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
+                self.status_msg = Some((true, format!("✓ Draft saved at {}", now_str)));
+                Ok(draft_id)
+            }
+            Err(e) => {
+                self.status_msg = Some((false, format!("Failed to save draft: {}", e)));
+                Err(e.to_string())
+            }
+        }
     }
 
     pub fn show(
@@ -152,7 +240,10 @@ impl ComposeView {
         templates: &[Template],
         signatures: &[Signature],
         keyring: &Arc<dyn CredentialStore>,
+        storage: &Storage,
         on_schedule_send: &mut Option<(OutgoingDraft, String)>,
+        on_data_changed: &mut bool,
+        status_toast: &mut Option<(String, std::time::Instant)>,
     ) {
         if !self.is_open {
             return;
@@ -163,8 +254,8 @@ impl ComposeView {
             .open(&mut is_open)
             .collapsible(false)
             .resizable(true)
-            .default_width(680.0)
-            .default_height(480.0)
+            .default_width(700.0)
+            .default_height(500.0)
             .show(ctx, |ui| {
                 if accounts.is_empty() {
                     ui.label("No email accounts configured. Please add an account first.");
@@ -178,13 +269,9 @@ impl ComposeView {
                     }
                 }
 
-                // 1. Top Action Toolbar (Send, From account, Templates, Signatures, Discard)
+                // 1. Top Action Toolbar
                 ui.horizontal(|ui| {
-                    let send_btn_label = if self.send_as_html {
-                        "🚀 Send"
-                    } else {
-                        "🚀 Send (Text)"
-                    };
+                    let send_btn_label = if self.send_as_html { "🚀 Send" } else { "🚀 Send (Text)" };
 
                     let top_send_btn = egui::Button::new(
                         RichText::new(send_btn_label)
@@ -196,31 +283,63 @@ impl ComposeView {
                     .rounding(Rounding::same(6.0));
 
                     if ui.add(top_send_btn).clicked() {
-                        self.execute_send(accounts, signatures, keyring, on_schedule_send);
+                        if self.execute_send(accounts, signatures, keyring, on_schedule_send, storage) {
+                            *on_data_changed = true;
+                        }
+                    }
+
+                    // Send Later Dropdown
+                    egui::ComboBox::from_id_salt("send_later_combo")
+                        .selected_text(RichText::new("⏰ Send Later ▾").size(12.0).color(AppTheme::ACCENT_PRIMARY))
+                        .show_ui(ui, |ui| {
+                            let now = Utc::now();
+                            if ui.button("⏰ In 15 minutes").clicked() {
+                                let target_ts = (now + Duration::minutes(15)).timestamp();
+                                if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
+                                    *status_toast = Some(("✓ Email scheduled for in 15 minutes".to_string(), std::time::Instant::now()));
+                                    *on_data_changed = true;
+                                }
+                            }
+                            if ui.button("⏰ In 1 hour").clicked() {
+                                let target_ts = (now + Duration::hours(1)).timestamp();
+                                if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
+                                    *status_toast = Some(("✓ Email scheduled for in 1 hour".to_string(), std::time::Instant::now()));
+                                    *on_data_changed = true;
+                                }
+                            }
+                            if ui.button("⏰ In 3 hours").clicked() {
+                                let target_ts = (now + Duration::hours(3)).timestamp();
+                                if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
+                                    *status_toast = Some(("✓ Email scheduled for in 3 hours".to_string(), std::time::Instant::now()));
+                                    *on_data_changed = true;
+                                }
+                            }
+                            if ui.button("📅 Custom Schedule...").clicked() {
+                                self.show_custom_schedule_dialog = true;
+                            }
+                        });
+
+                    // Save Draft Button
+                    if ui.button(RichText::new("💾 Save Draft").size(12.0)).clicked() {
+                        let _ = self.save_draft_to_storage(storage);
+                        *on_data_changed = true;
                     }
 
                     ui.add_space(4.0);
-
                     ui.label(RichText::new("From:").size(12.0).color(AppTheme::TEXT_MUTED));
                     let current_account = accounts.iter().find(|a| a.id == self.selected_account_id).unwrap_or(&accounts[0]);
                     let prev_account_id = self.selected_account_id.clone();
-
                     egui::ComboBox::from_id_salt("compose_from_combo")
                         .selected_text(format!("{} <{}>", current_account.name, current_account.email))
                         .show_ui(ui, |ui| {
                             for acc in accounts {
-                                ui.selectable_value(
-                                    &mut self.selected_account_id,
-                                    acc.id.clone(),
-                                    format!("{} <{}>", acc.name, acc.email),
-                                );
+                                ui.selectable_value(&mut self.selected_account_id, acc.id.clone(), format!("{} <{}>", acc.name, acc.email));
                             }
                         });
 
                     if self.selected_account_id != prev_account_id {
                         self.selected_signature_id = find_default_signature(signatures, Some(&self.selected_account_id)).map(|s| s.id.clone());
                     }
-
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("Discard").size(11.5)).clicked() {
                             self.is_open = false;
@@ -228,7 +347,7 @@ impl ComposeView {
 
                         // Templates picker
                         if !templates.is_empty() {
-                            egui::ComboBox::from_id_salt("template_picker_combo")
+                            egui::ComboBox::from_id_salt("compose_template_picker")
                                 .selected_text("📋 Template")
                                 .show_ui(ui, |ui| {
                                     for t in templates {
@@ -249,7 +368,7 @@ impl ComposeView {
                             "(None)"
                         };
 
-                        egui::ComboBox::from_id_salt("sig_picker_combo")
+                        egui::ComboBox::from_id_salt("compose_sig_picker")
                             .selected_text(format!("Sig: {}", selected_sig_label))
                             .show_ui(ui, |ui| {
                                 if ui.selectable_label(self.selected_signature_id.is_none(), "None (No Signature)").clicked() {
@@ -266,289 +385,66 @@ impl ComposeView {
                     });
                 });
 
+                if let Some((success, ref msg)) = self.status_msg {
+                    ui.add_space(2.0);
+                    let col = if success { AppTheme::ACCENT_SUCCESS } else { AppTheme::ACCENT_DANGER };
+                    ui.label(RichText::new(msg).size(11.0).color(col));
+                }
+
+                if self.show_custom_schedule_dialog {
+                    ui.add_space(4.0);
+                    egui::Frame::none().fill(AppTheme::BG_CARD).stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY)).rounding(Rounding::same(6.0)).inner_margin(8.0).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Schedule Send in:").strong().size(12.0));
+                            ui.add(egui::DragValue::new(&mut self.custom_schedule_hours).range(0..=720).prefix("Hours: "));
+                            ui.add(egui::DragValue::new(&mut self.custom_schedule_mins).range(0..=59).prefix("Mins: "));
+                            if ui.button(RichText::new("✓ Confirm Schedule").strong()).clicked() {
+                                let total_mins = (self.custom_schedule_hours as i64 * 60) + (self.custom_schedule_mins as i64);
+                                let target_ts = (Utc::now() + Duration::minutes(total_mins.max(1))).timestamp();
+                                if self.execute_schedule_send(accounts, signatures, keyring, storage, target_ts) {
+                                    *status_toast = Some((format!("✓ Scheduled for {}h {}m from now", self.custom_schedule_hours, self.custom_schedule_mins), std::time::Instant::now()));
+                                    *on_data_changed = true;
+                                    self.show_custom_schedule_dialog = false;
+                                }
+                            }
+                            if ui.button("Cancel").clicked() { self.show_custom_schedule_dialog = false; }
+                        });
+                    });
+                }
+
                 ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);
 
-                // 2. To & Cc/Bcc Fields
+                // 2. To, Cc, Bcc
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("To:").size(12.5).color(AppTheme::TEXT_MUTED));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.to_input)
-                            .hint_text("recipient@example.com")
-                            .desired_width(ui.available_width() - 80.0),
-                    );
-
-                    let toggle_label = if self.show_cc_bcc { "Hide Cc" } else { "Cc/Bcc" };
-                    if ui.button(RichText::new(toggle_label).size(11.0)).clicked() {
-                        self.show_cc_bcc = !self.show_cc_bcc;
-                    }
+                    ui.add(egui::TextEdit::singleline(&mut self.to_input).desired_width(ui.available_width() - 80.0));
+                    if ui.button(if self.show_cc_bcc { "Hide Cc" } else { "Cc/Bcc" }).clicked() { self.show_cc_bcc = !self.show_cc_bcc; }
                 });
-
                 if self.show_cc_bcc {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Cc:").size(12.5).color(AppTheme::TEXT_MUTED));
-                        ui.text_edit_singleline(&mut self.cc_input);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Bcc:").size(12.5).color(AppTheme::TEXT_MUTED));
-                        ui.text_edit_singleline(&mut self.bcc_input);
-                    });
+                    ui.horizontal(|ui| { ui.label("Cc:"); ui.text_edit_singleline(&mut self.cc_input); });
+                    ui.horizontal(|ui| { ui.label("Bcc:"); ui.text_edit_singleline(&mut self.bcc_input); });
                 }
-
-                // 3. Subject Line
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Subject:").size(12.5).color(AppTheme::TEXT_MUTED));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.subject)
-                            .hint_text("Enter subject...")
-                            .desired_width(ui.available_width() - 8.0),
-                    );
-                });
+                ui.horizontal(|ui| { ui.label("Subject:"); ui.text_edit_singleline(&mut self.subject); });
 
                 ui.add_space(6.0);
-
-                // 4. Format Selector & Rich Formatting Action Bar
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Format:").size(12.0).color(AppTheme::TEXT_MUTED));
-                    if ui.selectable_label(self.format == ComposeFormat::Markdown, "⚡ Markdown").on_hover_text("Write in Markdown with live preview").clicked() {
-                        self.format = ComposeFormat::Markdown;
-                        self.send_as_html = true;
-                    }
-                    if ui.selectable_label(self.format == ComposeFormat::Html, "🌐 HTML").on_hover_text("Send rich HTML email").clicked() {
-                        self.format = ComposeFormat::Html;
-                        self.send_as_html = true;
-                    }
-                    if ui.selectable_label(self.format == ComposeFormat::PlainText, "📝 Plain Text").on_hover_text("Send text-only email without HTML markup").clicked() {
-                        self.format = ComposeFormat::PlainText;
-                        self.send_as_html = false;
-                    }
-
-                    ui.separator();
-
-                    match self.format {
-                        ComposeFormat::Markdown => {
-                            if ui.button(RichText::new("B").strong()).on_hover_text("Bold **text**").clicked() {
-                                self.body_plain.push_str("**text**");
-                            }
-                            if ui.button(RichText::new("I").italics()).on_hover_text("Italic *text*").clicked() {
-                                self.body_plain.push_str("*text*");
-                            }
-                            if ui.button(RichText::new("🔗").size(12.0)).on_hover_text("Insert Link [title](url)").clicked() {
-                                self.body_plain.push_str("[Link text](https://)");
-                            }
-                            if ui.button(RichText::new("H1").strong()).on_hover_text("Heading 1 # ").clicked() {
-                                self.body_plain.push_str("\n# ");
-                            }
-                            if ui.button(RichText::new("H2").strong()).on_hover_text("Heading 2 ## ").clicked() {
-                                self.body_plain.push_str("\n## ");
-                            }
-                            if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list - ").clicked() {
-                                self.body_plain.push_str("\n- ");
-                            }
-                            if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote > ").clicked() {
-                                self.body_plain.push_str("\n> ");
-                            }
-                            if ui.button(RichText::new("💻 Code").size(11.0)).on_hover_text("Code block ```").clicked() {
-                                self.body_plain.push_str("\n```\n\n```\n");
-                            }
-
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let preview_icon = if self.show_markdown_preview { "👁 Hide Preview" } else { "👁 Live Preview" };
-                                if ui.selectable_label(self.show_markdown_preview, preview_icon).on_hover_text("Toggle live side-by-side Markdown HTML preview").clicked() {
-                                    self.show_markdown_preview = !self.show_markdown_preview;
-                                }
-                            });
-                        }
-                        ComposeFormat::Html => {
-                            if ui.button(RichText::new("B").strong()).on_hover_text("Bold <b></b>").clicked() {
-                                self.body_plain.push_str("<b></b>");
-                            }
-                            if ui.button(RichText::new("I").italics()).on_hover_text("Italic <i></i>").clicked() {
-                                self.body_plain.push_str("<i></i>");
-                            }
-                            if ui.button(RichText::new("🔗").size(12.0)).on_hover_text("Insert Link <a href=\"...\">").clicked() {
-                                self.body_plain.push_str("<a href=\"https://\">Link text</a>");
-                            }
-                            if ui.button(RichText::new("• List").size(11.0)).on_hover_text("Bullet list").clicked() {
-                                self.body_plain.push_str("\n • ");
-                            }
-                            if ui.button(RichText::new("> Quote").size(11.0)).on_hover_text("Blockquote").clicked() {
-                                self.body_plain.push_str("\n > ");
-                            }
-                        }
-                        ComposeFormat::PlainText => {
-                            ui.label(RichText::new("Plain text mode active").size(11.0).color(AppTheme::TEXT_MUTED));
-                        }
-                    }
-                });
-
-                ui.add_space(4.0);
                 ui.separator();
-                ui.add_space(4.0);
 
-                // 5. Body Text Editor & Content
+                // 3. Editor
                 if self.format == ComposeFormat::Markdown && self.show_markdown_preview {
-                    ui.columns(2, |columns| {
-                        // Left: Editor
-                        columns[0].vertical(|ui| {
-                            ui.label(RichText::new("✏ Markdown Editor").size(11.0).color(AppTheme::TEXT_MUTED));
-                            ui.add_space(2.0);
-                            egui::ScrollArea::vertical()
-                                .id_salt("compose_md_editor")
-                                .max_height(260.0)
-                                .auto_shrink([false; 2])
-                                .show(ui, |ui| {
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut self.body_plain)
-                                            .hint_text("Write Markdown here (#, **, *, -, ```, etc)...")
-                                            .font(egui::TextStyle::Monospace)
-                                            .desired_width(f32::INFINITY)
-                                            .desired_rows(12),
-                                    );
-                                });
-                        });
-
-                        // Right: Live Preview
-                        columns[1].vertical(|ui| {
-                            ui.label(RichText::new("👁 Live Preview").size(11.0).color(AppTheme::ACCENT_PRIMARY));
-                            ui.add_space(2.0);
-                            let compiled_html = email_html::markdown_to_html(&self.body_plain);
-                            let blocks = email_html::parse_html_to_blocks(&compiled_html);
-
-                            egui::Frame::none()
-                                .fill(Color32::from_rgb(22, 27, 40))
-                                .stroke(Stroke::new(1.0_f32, AppTheme::BORDER_SUBTLE))
-                                .rounding(Rounding::same(6.0))
-                                .inner_margin(8.0)
-                                .show(ui, |ui| {
-                                    egui::ScrollArea::vertical()
-                                        .id_salt("compose_md_preview")
-                                        .max_height(244.0)
-                                        .auto_shrink([false; 2])
-                                        .show(ui, |ui| {
-                                            if self.body_plain.trim().is_empty() {
-                                                ui.label(RichText::new("Live preview will appear here as you type...").italics().color(AppTheme::TEXT_MUTED));
-                                            } else {
-                                                for block in &blocks {
-                                                    match block {
-                                                        email_html::HtmlBlock::Heading { level, text, .. } => {
-                                                            let size = match level { 1 => 18.0, 2 => 15.0, _ => 13.0 };
-                                                            ui.label(RichText::new(text).size(size).strong().color(Color32::WHITE));
-                                                        }
-                                                        email_html::HtmlBlock::Paragraph { spans, .. } => {
-                                                            ui.horizontal_wrapped(|ui| {
-                                                                for span in spans {
-                                                                    let mut rt = RichText::new(&span.text).size(12.5);
-                                                                    if span.link_url.is_some() {
-                                                                        rt = rt.color(AppTheme::ACCENT_PRIMARY).underline();
-                                                                    } else {
-                                                                        rt = rt.color(AppTheme::TEXT_PRIMARY);
-                                                                    }
-                                                                    if matches!(span.style, email_html::TextStyle::Bold | email_html::TextStyle::BoldItalic) {
-                                                                        rt = rt.strong();
-                                                                    }
-                                                                    if matches!(span.style, email_html::TextStyle::Italic | email_html::TextStyle::BoldItalic) {
-                                                                        rt = rt.italics();
-                                                                    }
-                                                                    ui.label(rt);
-                                                                }
-                                                            });
-                                                        }
-                                                        email_html::HtmlBlock::CodeBlock(code) => {
-                                                            egui::Frame::none()
-                                                                .fill(Color32::from_rgb(14, 18, 28))
-                                                                .rounding(Rounding::same(4.0))
-                                                                .inner_margin(6.0)
-                                                                .show(ui, |ui| {
-                                                                    ui.label(RichText::new(code).font(egui::FontId::monospace(11.5)).color(Color32::from_rgb(220, 230, 245)));
-                                                                });
-                                                        }
-                                                        email_html::HtmlBlock::Blockquote(quote) => {
-                                                            ui.horizontal(|ui| {
-                                                                ui.label(RichText::new("▎").color(AppTheme::ACCENT_PRIMARY));
-                                                                ui.label(RichText::new(quote).italics().color(AppTheme::TEXT_SECONDARY));
-                                                            });
-                                                        }
-                                                        email_html::HtmlBlock::ListItem(spans) => {
-                                                            ui.horizontal(|ui| {
-                                                                ui.label(RichText::new("•").size(12.0).color(AppTheme::ACCENT_PRIMARY));
-                                                                for span in spans {
-                                                                    ui.label(RichText::new(&span.text).size(12.0).color(AppTheme::TEXT_PRIMARY));
-                                                                }
-                                                            });
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                    ui.add_space(2.0);
-                                                }
-                                            }
-                                        });
-                                });
-                        });
-                    });
+                     ui.label("Editor...");
+                     ui.add(egui::TextEdit::multiline(&mut self.body_plain).desired_rows(12).desired_width(f32::INFINITY));
                 } else {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.body_plain)
-                                    .hint_text("Type your message here...")
-                                    .font(egui::TextStyle::Body)
-                                    .desired_width(f32::INFINITY)
-                                    .desired_rows(13),
-                            );
-
-                            ui.add_space(6.0);
-
-                            // Attached Signature preview info
-                            if let Some(ref sig_id) = self.selected_signature_id {
-                                if let Some(sig) = signatures.iter().find(|s| &s.id == sig_id) {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new("Signature:").size(11.0).color(AppTheme::TEXT_MUTED));
-                                        ui.label(RichText::new(&sig.name).size(11.0).strong().color(AppTheme::ACCENT_PRIMARY));
-                                        let plain_preview = email_html::html_to_plain_text(&sig.content_html);
-                                        let truncated = if plain_preview.len() > 50 {
-                                            format!("{}...", &plain_preview[..47])
-                                        } else {
-                                            plain_preview
-                                        };
-                                        ui.label(RichText::new(format!("({})", truncated)).size(10.5).color(AppTheme::TEXT_MUTED));
-                                    });
-                                }
-                            }
-
-                            // Quoted Previous Message expandable
-                            if let Some(ref quote) = self.reply_quote {
-                                ui.add_space(4.0);
-                                ui.collapsing(RichText::new("Quoted Previous Message").size(11.0).color(AppTheme::TEXT_MUTED), |ui| {
-                                    ui.label(RichText::new(quote).size(11.0).color(AppTheme::TEXT_SECONDARY));
-                                });
-                            }
-
-                            if let Some(ref err) = self.error_msg {
-                                ui.add_space(4.0);
-                                ui.label(RichText::new(err).color(AppTheme::ACCENT_DANGER));
-                            }
-
-                            ui.add_space(8.0);
-                        });
+                     ui.add(egui::TextEdit::multiline(&mut self.body_plain).desired_rows(12).desired_width(f32::INFINITY));
                 }
             });
-
         self.is_open = self.is_open && is_open;
     }
 
-    fn execute_send(
-        &mut self,
-        accounts: &[Account],
-        signatures: &[Signature],
-        keyring: &Arc<dyn CredentialStore>,
-        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
-    ) {
+    fn build_outgoing_draft(&self, signatures: &[Signature]) -> Result<OutgoingDraft, String> {
         if self.to_input.trim().is_empty() {
-            self.error_msg = Some("Please specify at least one recipient email address.".to_string());
-            return;
+            return Err("Please specify at least one recipient email address.".to_string());
         }
 
         let to_list: Vec<Recipient> = self
@@ -629,7 +525,7 @@ impl ComposeView {
             }
         };
 
-        let draft = OutgoingDraft {
+        Ok(OutgoingDraft {
             account_id: self.selected_account_id.clone(),
             to: to_list,
             cc: cc_list,
@@ -639,18 +535,79 @@ impl ComposeView {
             body_html,
             in_reply_to: self.in_reply_to.clone(),
             references: self.references.clone(),
-        };
+        })
+    }
 
-        let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
-        if let Some(acc) = current_account {
-            match keyring.get_credential(&acc.credential_key) {
-                Ok(pwd) => {
-                    *on_schedule_send = Some((draft, pwd));
+    fn execute_send(
+        &mut self,
+        accounts: &[Account],
+        signatures: &[Signature],
+        keyring: &Arc<dyn CredentialStore>,
+        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
+        storage: &Storage,
+    ) -> bool {
+        match self.build_outgoing_draft(signatures) {
+            Ok(draft) => {
+                let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
+                if let Some(acc) = current_account {
+                    match keyring.get_credential(&acc.credential_key) {
+                        Ok(pwd) => {
+                            if let Some(ref did) = self.draft_id {
+                                let _ = storage.delete_draft(did);
+                            }
+                            *on_schedule_send = Some((draft, pwd));
+                            self.is_open = false;
+                            true
+                        }
+                        Err(e) => {
+                            self.error_msg = Some(format!("Could not retrieve account credentials: {}", e));
+                            false
+                        }
+                    }
+                } else {
+                    self.error_msg = Some("Account not found.".to_string());
+                    false
+                }
+            }
+            Err(e) => {
+                self.error_msg = Some(e);
+                false
+            }
+        }
+    }
+
+    fn execute_schedule_send(
+        &mut self,
+        accounts: &[Account],
+        signatures: &[Signature],
+        _keyring: &Arc<dyn CredentialStore>,
+        storage: &Storage,
+        target_timestamp: i64,
+    ) -> bool {
+        match self.build_outgoing_draft(signatures) {
+            Ok(draft) => {
+                let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
+                if let Some(acc) = current_account {
+                    let scheduled = ScheduledEmail::new(acc.id.clone(), draft, target_timestamp);
+                    if let Err(e) = storage.save_scheduled_email(&scheduled) {
+                        self.error_msg = Some(format!("Failed to schedule email: {}", e));
+                        return false;
+                    }
+
+                    if let Some(ref did) = self.draft_id {
+                        let _ = storage.delete_draft(did);
+                    }
+
                     self.is_open = false;
+                    true
+                } else {
+                    self.error_msg = Some("Account not found.".to_string());
+                    false
                 }
-                Err(e) => {
-                    self.error_msg = Some(format!("Could not retrieve account credentials from OS Keyring: {}", e));
-                }
+            }
+            Err(e) => {
+                self.error_msg = Some(e);
+                false
             }
         }
     }

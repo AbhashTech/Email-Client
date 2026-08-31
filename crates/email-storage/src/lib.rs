@@ -956,6 +956,235 @@ impl Storage {
             .map_err(|e| EmailError::Database(e.to_string()))?;
         Ok(())
     }
+
+    // ==========================================
+    // Local Drafts
+    // ==========================================
+
+    pub fn save_draft(&self, draft: &Draft) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO drafts (
+                id, account_id, to_input, cc_input, bcc_input, subject, body_plain,
+                format, signature_id, in_reply_to, references_header, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                account_id=excluded.account_id,
+                to_input=excluded.to_input,
+                cc_input=excluded.cc_input,
+                bcc_input=excluded.bcc_input,
+                subject=excluded.subject,
+                body_plain=excluded.body_plain,
+                format=excluded.format,
+                signature_id=excluded.signature_id,
+                in_reply_to=excluded.in_reply_to,
+                references_header=excluded.references_header,
+                updated_at=excluded.updated_at
+            "#,
+            params![
+                draft.id,
+                draft.account_id,
+                draft.to_input,
+                draft.cc_input,
+                draft.bcc_input,
+                draft.subject,
+                draft.body_plain,
+                draft.format,
+                draft.signature_id,
+                draft.in_reply_to,
+                draft.references,
+                draft.updated_at,
+            ],
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_draft(&self, id: &str) -> Result<Option<Draft>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT id, account_id, to_input, cc_input, bcc_input, subject, body_plain, format, signature_id, in_reply_to, references_header, updated_at FROM drafts WHERE id = ?1")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut rows = stmt
+            .query(params![id])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        if let Some(row) = rows.next().map_err(|e| EmailError::Database(e.to_string()))? {
+            Ok(Some(Draft {
+                id: row.get(0).map_err(|e| EmailError::Database(e.to_string()))?,
+                account_id: row.get(1).map_err(|e| EmailError::Database(e.to_string()))?,
+                to_input: row.get(2).map_err(|e| EmailError::Database(e.to_string()))?,
+                cc_input: row.get(3).map_err(|e| EmailError::Database(e.to_string()))?,
+                bcc_input: row.get(4).map_err(|e| EmailError::Database(e.to_string()))?,
+                subject: row.get(5).map_err(|e| EmailError::Database(e.to_string()))?,
+                body_plain: row.get(6).map_err(|e| EmailError::Database(e.to_string()))?,
+                format: row.get(7).map_err(|e| EmailError::Database(e.to_string()))?,
+                signature_id: row.get(8).map_err(|e| EmailError::Database(e.to_string()))?,
+                in_reply_to: row.get(9).map_err(|e| EmailError::Database(e.to_string()))?,
+                references: row.get(10).map_err(|e| EmailError::Database(e.to_string()))?,
+                updated_at: row.get(11).map_err(|e| EmailError::Database(e.to_string()))?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn list_drafts(&self, account_id: Option<&str>) -> Result<Vec<Draft>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let sql = match account_id {
+            Some(_) => "SELECT id, account_id, to_input, cc_input, bcc_input, subject, body_plain, format, signature_id, in_reply_to, references_header, updated_at FROM drafts WHERE account_id = ?1 ORDER BY updated_at DESC",
+            None => "SELECT id, account_id, to_input, cc_input, bcc_input, subject, body_plain, format, signature_id, in_reply_to, references_header, updated_at FROM drafts ORDER BY updated_at DESC",
+        };
+
+        fn map_draft(row: &rusqlite::Row) -> rusqlite::Result<Draft> {
+            Ok(Draft {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                to_input: row.get(2)?,
+                cc_input: row.get(3)?,
+                bcc_input: row.get(4)?,
+                subject: row.get(5)?,
+                body_plain: row.get(6)?,
+                format: row.get(7)?,
+                signature_id: row.get(8)?,
+                in_reply_to: row.get(9)?,
+                references: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        }
+
+        let mut stmt = conn.prepare(sql).map_err(|e| EmailError::Database(e.to_string()))?;
+        let rows = if let Some(aid) = account_id {
+            stmt.query_map(params![aid], map_draft).map_err(|e| EmailError::Database(e.to_string()))?
+        } else {
+            stmt.query_map([], map_draft).map_err(|e| EmailError::Database(e.to_string()))?
+        };
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| EmailError::Database(e.to_string()))?);
+        }
+        Ok(list)
+    }
+
+    pub fn delete_draft(&self, id: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute("DELETE FROM drafts WHERE id = ?1", params![id])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    // ==========================================
+    // Scheduled Emails (Send Later)
+    // ==========================================
+
+    pub fn save_scheduled_email(&self, item: &ScheduledEmail) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let draft_json = serde_json::to_string(&item.draft)
+            .map_err(|e| EmailError::Database(format!("Serialization error: {}", e)))?;
+
+        conn.execute(
+            r#"
+            INSERT INTO scheduled_emails (id, account_id, draft_json, send_at_timestamp, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+                account_id=excluded.account_id,
+                draft_json=excluded.draft_json,
+                send_at_timestamp=excluded.send_at_timestamp,
+                created_at=excluded.created_at
+            "#,
+            params![
+                item.id,
+                item.account_id,
+                draft_json,
+                item.send_at_timestamp,
+                item.created_at,
+            ],
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_due_scheduled_emails(&self, now_timestamp: i64) -> Result<Vec<ScheduledEmail>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT id, account_id, draft_json, send_at_timestamp, created_at FROM scheduled_emails WHERE send_at_timestamp <= ?1 ORDER BY send_at_timestamp ASC")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![now_timestamp], |row| {
+                let id: String = row.get(0)?;
+                let account_id: String = row.get(1)?;
+                let draft_json: String = row.get(2)?;
+                let send_at_timestamp: i64 = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                Ok((id, account_id, draft_json, send_at_timestamp, created_at))
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            let (id, account_id, draft_json, send_at_timestamp, created_at) =
+                r.map_err(|e| EmailError::Database(e.to_string()))?;
+            if let Ok(draft) = serde_json::from_str::<OutgoingDraft>(&draft_json) {
+                list.push(ScheduledEmail {
+                    id,
+                    account_id,
+                    draft,
+                    send_at_timestamp,
+                    created_at,
+                });
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn list_all_scheduled(&self, account_id: Option<&str>) -> Result<Vec<ScheduledEmail>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let sql = match account_id {
+            Some(_) => "SELECT id, account_id, draft_json, send_at_timestamp, created_at FROM scheduled_emails WHERE account_id = ?1 ORDER BY send_at_timestamp ASC",
+            None => "SELECT id, account_id, draft_json, send_at_timestamp, created_at FROM scheduled_emails ORDER BY send_at_timestamp ASC",
+        };
+
+        fn map_scheduled(row: &rusqlite::Row) -> rusqlite::Result<(String, String, String, i64, i64)> {
+            let id: String = row.get(0)?;
+            let account_id: String = row.get(1)?;
+            let draft_json: String = row.get(2)?;
+            let send_at_timestamp: i64 = row.get(3)?;
+            let created_at: i64 = row.get(4)?;
+            Ok((id, account_id, draft_json, send_at_timestamp, created_at))
+        }
+
+        let mut stmt = conn.prepare(sql).map_err(|e| EmailError::Database(e.to_string()))?;
+        let rows = if let Some(aid) = account_id {
+            stmt.query_map(params![aid], map_scheduled).map_err(|e| EmailError::Database(e.to_string()))?
+        } else {
+            stmt.query_map([], map_scheduled).map_err(|e| EmailError::Database(e.to_string()))?
+        };
+
+        let mut list = Vec::new();
+        for r in rows {
+            let (id, account_id, draft_json, send_at_timestamp, created_at) =
+                r.map_err(|e| EmailError::Database(e.to_string()))?;
+            if let Ok(draft) = serde_json::from_str::<OutgoingDraft>(&draft_json) {
+                list.push(ScheduledEmail {
+                    id,
+                    account_id,
+                    draft,
+                    send_at_timestamp,
+                    created_at,
+                });
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn delete_scheduled_email(&self, id: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute("DELETE FROM scheduled_emails WHERE id = ?1", params![id])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1139,6 +1368,104 @@ mod tests {
         assert_eq!(q.is_flagged, Some(true));
         assert!(q.has_attachment);
         assert_eq!(q.free_text, vec!["important", "update"]);
+    }
+
+    #[test]
+    fn test_drafts_crud_flow() {
+        let storage = Storage::new_in_memory().unwrap();
+        let account = Account::new(
+            "Draft Tester".to_string(),
+            "tester@draft.com".to_string(),
+            "imap.draft.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.draft.com".to_string(),
+            465,
+            SecurityType::Tls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let mut draft = Draft::new(
+            account.id.clone(),
+            "recipient@example.com".to_string(),
+            "cc@example.com".to_string(),
+            "".to_string(),
+            "Work Draft Subject".to_string(),
+            "Initial draft body...".to_string(),
+            "markdown".to_string(),
+            None,
+            None,
+            None,
+        );
+
+        storage.save_draft(&draft).unwrap();
+
+        let list = storage.list_drafts(Some(&account.id)).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].subject, "Work Draft Subject");
+
+        let fetched = storage.get_draft(&draft.id).unwrap().expect("Found draft");
+        assert_eq!(fetched.body_plain, "Initial draft body...");
+
+        draft.body_plain = "Updated draft body content".to_string();
+        storage.save_draft(&draft).unwrap();
+
+        let updated = storage.get_draft(&draft.id).unwrap().unwrap();
+        assert_eq!(updated.body_plain, "Updated draft body content");
+
+        storage.delete_draft(&draft.id).unwrap();
+        assert!(storage.get_draft(&draft.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_scheduled_emails_flow() {
+        let storage = Storage::new_in_memory().unwrap();
+        let account = Account::new(
+            "Scheduled Tester".to_string(),
+            "tester@scheduled.com".to_string(),
+            "imap.scheduled.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.scheduled.com".to_string(),
+            465,
+            SecurityType::Tls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let now = chrono::Utc::now().timestamp();
+        let outgoing = OutgoingDraft {
+            account_id: account.id.clone(),
+            to: vec![Recipient::new(None, "dest@example.com".to_string())],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Scheduled Launch".to_string(),
+            body_plain: "Rocket is fueled!".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            references: None,
+        };
+
+        let scheduled_past = ScheduledEmail::new(account.id.clone(), outgoing.clone(), now - 30);
+        let scheduled_future = ScheduledEmail::new(account.id.clone(), outgoing, now + 3600);
+
+        storage.save_scheduled_email(&scheduled_past).unwrap();
+        storage.save_scheduled_email(&scheduled_future).unwrap();
+
+        let all = storage.list_all_scheduled(Some(&account.id)).unwrap();
+        assert_eq!(all.len(), 2);
+
+        let due = storage.get_due_scheduled_emails(now).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, scheduled_past.id);
+
+        storage.delete_scheduled_email(&scheduled_past.id).unwrap();
+        let remaining = storage.list_all_scheduled(None).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, scheduled_future.id);
     }
 }
 

@@ -400,6 +400,77 @@ impl Signature {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Draft {
+    pub id: String,
+    pub account_id: String,
+    pub to_input: String,
+    pub cc_input: String,
+    pub bcc_input: String,
+    pub subject: String,
+    pub body_plain: String,
+    pub format: String, // "markdown", "html", "plaintext"
+    pub signature_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+    pub updated_at: i64,
+}
+
+impl Draft {
+    pub fn new(
+        account_id: String,
+        to_input: String,
+        cc_input: String,
+        bcc_input: String,
+        subject: String,
+        body_plain: String,
+        format: String,
+        signature_id: Option<String>,
+        in_reply_to: Option<String>,
+        references: Option<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            account_id,
+            to_input,
+            cc_input,
+            bcc_input,
+            subject,
+            body_plain,
+            format,
+            signature_id,
+            in_reply_to,
+            references,
+            updated_at: Utc::now().timestamp(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledEmail {
+    pub id: String,
+    pub account_id: String,
+    pub draft: OutgoingDraft,
+    pub send_at_timestamp: i64,
+    pub created_at: i64,
+}
+
+impl ScheduledEmail {
+    pub fn new(account_id: String, draft: OutgoingDraft, send_at_timestamp: i64) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            account_id,
+            draft,
+            send_at_timestamp,
+            created_at: Utc::now().timestamp(),
+        }
+    }
+
+    pub fn is_due(&self) -> bool {
+        Utc::now().timestamp() >= self.send_at_timestamp
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,5 +700,51 @@ mod backup_tests {
         let restored: AppBackup = serde_json::from_str(&json).expect("Deserialize backup");
         assert_eq!(restored.accounts.len(), 1);
         assert_eq!(restored.accounts[0].sync_days_window, SyncWindow::Days60);
+    }
+
+    #[test]
+    fn test_draft_model_json_serialization() {
+        let draft = Draft::new(
+            "acc_123".to_string(),
+            "alice@example.com".to_string(),
+            "bob@example.com".to_string(),
+            "".to_string(),
+            "Project Proposal".to_string(),
+            "Hello Alice,\nHere is the plan.".to_string(),
+            "markdown".to_string(),
+            Some("sig_1".to_string()),
+            None,
+            None,
+        );
+
+        let json = serde_json::to_string(&draft).expect("Serialize draft");
+        let restored: Draft = serde_json::from_str(&json).expect("Deserialize draft");
+        assert_eq!(restored.account_id, "acc_123");
+        assert_eq!(restored.to_input, "alice@example.com");
+        assert_eq!(restored.subject, "Project Proposal");
+        assert_eq!(restored.format, "markdown");
+    }
+
+    #[test]
+    fn test_scheduled_email_due_check() {
+        let draft = OutgoingDraft {
+            account_id: "acc_1".to_string(),
+            to: vec![Recipient::new(None, "user@test.com".to_string())],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Scheduled Subject".to_string(),
+            body_plain: "Scheduled body".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            references: None,
+        };
+
+        // Past timestamp is due
+        let past = ScheduledEmail::new("acc_1".to_string(), draft.clone(), Utc::now().timestamp() - 10);
+        assert!(past.is_due());
+
+        // Future timestamp is not due
+        let future = ScheduledEmail::new("acc_1".to_string(), draft, Utc::now().timestamp() + 3600);
+        assert!(!future.is_due());
     }
 }

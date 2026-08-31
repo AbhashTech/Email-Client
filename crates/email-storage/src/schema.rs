@@ -96,9 +96,36 @@ CREATE TABLE IF NOT EXISTS signatures (
     created_at INTEGER NOT NULL
 );
 
+-- Local Drafts
+CREATE TABLE IF NOT EXISTS drafts (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    to_input TEXT NOT NULL DEFAULT '',
+    cc_input TEXT NOT NULL DEFAULT '',
+    bcc_input TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
+    body_plain TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT 'markdown',
+    signature_id TEXT,
+    in_reply_to TEXT,
+    references_header TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+-- Scheduled Emails (Send Later)
+CREATE TABLE IF NOT EXISTS scheduled_emails (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    draft_json TEXT NOT NULL,
+    send_at_timestamp INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
 -- Indexes for lightning fast lookups
 CREATE INDEX IF NOT EXISTS idx_messages_folder_date ON messages(folder_id, date_epoch DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_account_unread ON messages(account_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(subject, from_address, snippet);
 CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_account ON drafts(account_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_emails(send_at_timestamp ASC);
 "#;

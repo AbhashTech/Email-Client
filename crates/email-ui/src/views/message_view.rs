@@ -19,6 +19,7 @@ impl MessageViewPane {
         on_reply_plain: &mut Option<MessageDetail>,
         on_reply_all: &mut Option<MessageDetail>,
         on_forward: &mut Option<MessageDetail>,
+        on_edit_draft: &mut Option<MessageDetail>,
         on_delete: &mut Option<String>,
         on_toggle_read: &mut Option<(String, bool)>,
         on_move_folder: &mut Option<(String, String)>,
@@ -46,6 +47,16 @@ impl MessageViewPane {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
             ui.spacing_mut().button_padding = Vec2::new(8.0, 4.5);
+
+            if msg.is_draft {
+                let edit_btn = egui::Button::new(RichText::new("✏ Edit Draft").strong().size(12.0).color(Color32::WHITE))
+                    .fill(AppTheme::ACCENT_PRIMARY)
+                    .rounding(Rounding::same(6.0));
+                if ui.add(edit_btn).clicked() {
+                    *on_edit_draft = Some(detail.clone());
+                }
+            }
+
             if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
                 *on_reply = Some(detail.clone());
             }
