@@ -4,53 +4,92 @@
 
 ---
 
+## ⌨️ Keyboard Shortcuts & Power Navigation
+
+AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipresent Command Palette for high-efficiency workflows.
+
+| Shortcut | Action | Scope / Context |
+|---|---|---|
+| <kbd>Ctrl</kbd> + <kbd>K</kbd> / <kbd>Cmd</kbd> + <kbd>K</kbd> | **Open Command Palette** (Fuzzy command launcher) | Global |
+| <kbd>Ctrl</kbd> + <kbd>P</kbd> | **Open Command Palette** (Alternative hotkey) | Global |
+| <kbd>/</kbd> | **Focus Search Bar** | Global |
+| <kbd>j</kbd> or <kbd>↓</kbd> | **Next Email** | Message List |
+| <kbd>k</kbd> or <kbd>↑</kbd> | **Previous Email** | Message List |
+| <kbd>x</kbd> | **Toggle Checkbox Selection** (Multi-select) | Message List |
+| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + Click | **Toggle Individual Selection** | Message List |
+| <kbd>Shift</kbd> + Click | **Select Contiguous Range** | Message List |
+| <kbd>c</kbd> | **Compose New Email** | Global |
+| <kbd>r</kbd> | **Reply to Email** (HTML default) | Message View / List |
+| <kbd>a</kbd> | **Reply All** | Message View / List |
+| <kbd>f</kbd> | **Forward Email** | Message View / List |
+| <kbd>s</kbd> | **Toggle Star / Flag** | Message View / List |
+| <kbd>u</kbd> | **Toggle Read / Unread** | Message View / List |
+| <kbd>Del</kbd> / <kbd>Backspace</kbd> | **Delete Selected Email(s)** | Message View / List |
+| <kbd>Esc</kbd> | **Close Active Modal / Dismiss Palette** | Modals & Overlays |
+
+---
+
 ## ✨ Key Features
 
-- ⚡ **Ultra-Low Memory Footprint & High Performance**:
-  - Built with native **Rust** and GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead.
-  - Startup time < 100ms; idle resident memory footprint < 45 MB.
+### ⚡ Performance & Core Architecture
+- **Ultra-Low Memory Footprint**: Built in **pure Rust** with GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead. Startup time < 100ms; idle resident memory footprint < 45 MB.
+- **Embedded SQLite WAL Engine**: Full MIME messages, HTML bodies, and plain-text alternatives are indexed and cached locally with Write-Ahead Logging (WAL) for 0ms latency when opening emails.
+- **Async IMAP/SMTP Pipeline**: Full RFC 2047 envelope parsing (`mailparse`), configurable date-window syncing (7d, 14d, 30d, 90d, 1y, All Time), and safe connection pooling.
+- **OS-Native Keyring Integration**: Secure credential storage via Linux Secret Service, macOS Keychain, and Windows Credential Manager (`keyring-rs`). Passwords are never stored in plaintext.
 
-- 🖥️ **True 3-Pane Resizable Layout & Drag-and-Drop**:
-  - **Sidebar Panel**: Resizable panel (180px–320px) displaying unified Smart Views (All Inboxes, Unread, Starred, Sent, Drafts, Trash) and collapsible account folder trees. Acts as active **Drag-and-Drop drop targets** with visual glow highlights.
-  - **Message List Panel**: Resizable panel (260px–600px) with virtualized scrolling, sender avatar pills, unread indicators, live multi-attribute search, and full multi-selection support.
-  - **Reading Pane**: Full-width reading container with responsive email header cards, rendered HTML bodies, attachments, and quick action bar (Reply, Reply All, Forward, Star, Mark Read/Unread, Delete).
+---
 
-- 📦 **Multi-Select & Batch Operations**:
-  - **Multiple Selection Methods**: Select emails via row checkboxes `[✓]`, `Ctrl / Cmd + Click` to toggle individual items, and `Shift + Click` to select contiguous ranges.
-  - **Dynamic Batch Actions Bar**: Quick access to **Batch Delete (`🗑 Delete`)**, **Batch Move (`📁 Move ▾`)** to any folder, **Batch Mark Read/Unread (`✉ Read` / `✉ Unread`)**, **Batch Star (`★ Star`)**, and **Select All / Deselect All (`[☑]`)**.
-  - **Drag-and-Drop Organization**: Drag any email or batch of selected emails directly onto sidebar folders with real-time mouse payload badges (`📁 Moving N emails...`).
+### 🔍 Command Palette & Smart Search
+- **⚡ Command Palette (`Ctrl+K` / `Cmd+K`)**: Modal command launcher with fuzzy filtering, categorical grouping (Navigation, Folders, Actions, Message, Themes), and keyboard arrow navigation.
+- **🏷️ Quick Filter Chips**: Tactile chip buttons (`[All]`, `[✉ Unread]`, `[★ Starred]`, `[📎 Files]`) above the message list with active visual indicators.
+- **🔎 Structured Search Tokens**: Search query parser supporting structured search tokens alongside free-text queries:
+  - `from:alice@work.com`
+  - `to:team@company.com`
+  - `subject:financial report`
+  - `has:attachment`
+  - `is:unread` / `is:read`
+  - `is:starred` / `is:flagged`
 
-- 📬 **Full IMAP & SMTP Engine**:
-  - **MIME & Envelope Decoding**: Automatic RFC 2047 and MIME parsing (`mailparse`) resolving subjects, senders, recipients, and timestamps.
-  - **Smart Date-Window Sync**: Configurable sync windows (Last 7 Days, 14 Days, 30 Days, 90 Days, 1 Year, or All Time).
-  - **Full Offline Caching**: Full MIME messages, HTML bodies, and plain-text alternatives are stored locally in SQLite with WAL mode for 0ms latency when opening emails.
-  - **Per-Folder Sync Selection**: Choose exactly which remote folders to synchronize via `⚙ Settings -> 📬 Accounts`.
-  - **Safe Connection Management**: Serialized connection pool with explicit `LOGOUT` lifecycle to prevent account lockout on multi-connection mail providers (Zoho, Hostinger, Gmail, Outlook).
+---
 
-- ✉️ **Modern Composer & Smart Reply**:
-  - **HTML Email by Default**: Default rich HTML email formatting (`🌐 HTML (Default)`) with clean MIME multipart alternative generation and plain-text fallbacks.
-  - **Format Mode Switcher**: Easily toggle between HTML and Text-Only (`📝 Plain Text`) with one click in the composer toolbar.
-  - **Rich Formatting Toolbar**: Quick actions for Bold, Italic, Link insertion, Bulleted lists, and Blockquotes.
-  - **Text-Only Reply Action**: Dedicated `📝 Text Reply` button in the reading pane to reply in clean plain text with converted quoted context.
-  - **Automatic Default Signatures**: Default signatures (account-specific or global) are automatically attached to new emails and replies, with support for rich HTML signatures, HTML sanitization, and toolbar dropdown selector.
+### 📝 Composer & Undo Send
+- **⚡ Markdown Compose Mode with Live Preview**: Side-by-side split screen for drafting emails in Markdown with real-time rendered HTML preview. Includes formatting action buttons for Bold, Italic, Headings, Lists, Blockquotes, and Code Blocks.
+- **🌐 HTML & Plain Text Modes**: Full support for HTML rich text and Text-Only drafting modes.
+- **↩ 5-Second Undo Send**: Outgoing emails enter a 5-second safety buffer with a floating countdown bar (`[ ↩ Undo Send ]` / `[ ⚡ Send Now ]`). Clicking Undo immediately aborts transmission and restores the full draft into the composer.
+- **🖋️ Default & Custom Signatures**: Automatically attaches account-specific or global signatures with HTML sanitization.
+- **📋 Boilerplate Templates**: Reusable response snippets with dynamic variable substitutions (`{{name}}`, `{{sender}}`, `{{date}}`).
 
-- 🎨 **HTML Email Rendering, WebKit View & Safe File Dialogs**:
-  - Native AST HTML sanitizer that removes conditional comments (`<!--[if ...]>`), XML declarations, and `<style>` blocks.
-  - Automatic `cid:xxx` inline MIME attachment resolution with GPU image rendering (PNG, JPEG, WebP, SVG).
-  - Non-blocking asynchronous file save dialogs for attachments and image context menus.
-  - In-App WebKit reader window with seamless browser fallback.
+---
 
-- ⚙️ **Rich Preferences & Customization**:
-  - **Account Manager**: Add, edit, test connections, and delete IMAP/SMTP accounts.
-  - **Signatures**: Create, edit, and assign custom default signatures with preview and automatic HTML sanitization.
-  - **Quick Templates**: Manage boilerplate snippets with variable substitution (`{{name}}`, `{{sender}}`, `{{date}}`).
-  - **General Telemetry**: Live SQLite WAL database stats, resident memory footprint telemetry, and system tray integration.
+### 🛡️ Privacy Shield & Security
+- **🛡️ Remote Image Blocker**: Automatically suppresses external `http://` / `https://` tracking pixels and remote images to safeguard IP privacy and prevent email tracking. Users can load images on demand with one click (`[ 🖼 Load Images ]`).
+- **⚠️ Anti-Phishing Link Safety Detector**: Identifies deceptive hyperlinks where the visible display text (e.g. `paypal.com`) points to a different destination domain (`evil-site.com`). Highlights suspicious links with warning badges (`⚠️ [Deceptive Link!]`) and detailed tooltips.
 
-- 🔒 **Security & Credentials**:
-  - OS-level secure storage integration using Linux Secret Service / macOS Keychain / Windows Credential Manager (`keyring-rs`). Passwords are never stored in plaintext.
+---
 
-- 🔔 **System Tray Integration**:
-  - Integrated DBus StatusNotifierItem (`ksni`) with live unread badge counters, minimize-to-tray, and quick compose actions.
+### 🎨 Multi-Theme Engine
+Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance` or the `Ctrl+K` Command Palette:
+1. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents.
+2. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights.
+3. **Nord Arctic**: Crisp north-bluish dark aesthetic.
+4. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette.
+5. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
+6. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments.
+
+---
+
+### 📤 1-Click Message Export
+Export any email directly from the reading pane toolbar (`📤 Export ▾`):
+- **`📄 Markdown (.md)`**: Export with YAML frontmatter headers (Subject, From, To, Cc, Date) and formatted body text.
+- **`🌐 HTML Document (.html)`**: Standalone, styled HTML document viewable in any browser.
+- **`✉ Raw EML (.eml)`**: Standard RFC-822 formatted message file compatible with all standard email clients.
+
+---
+
+### 📦 Multi-Select, Batch Actions & Drag-and-Drop
+- **Multi-Select**: Select emails using row checkboxes `[✓]`, `Ctrl / Cmd + Click`, or `Shift + Click` range selection.
+- **Batch Actions Bar**: Perform bulk operations across selected items: Batch Delete (`🗑 Delete`), Batch Move (`📁 Move ▾`), Batch Mark Read/Unread (`✉ Read` / `✉ Unread`), and Batch Star (`★ Star`).
+- **Drag-and-Drop**: Drag individual or batch-selected emails directly onto sidebar folders with live mouse payload count badges (`📁 Moving N emails...`).
 
 ---
 
@@ -62,11 +101,11 @@ Email-Application/
 ├── crates/
 │   ├── email-core/          # Domain models, errors, event definitions (SyncCommand / SyncEvent)
 │   ├── email-keychain/      # Native OS Keyring abstraction layer
-│   ├── email-storage/       # SQLite storage engine with connection pooling (r2d2) and WAL mode
+│   ├── email-storage/       # SQLite storage engine with connection pooling (r2d2), WAL mode, and structured search
 │   ├── email-smtp/          # Asynchronous SMTP client (lettre + tokio-rustls)
 │   ├── email-sync/          # IMAP synchronization actor (async-imap + mailparse)
-│   ├── email-html/          # HTML AST sanitizer, parser, and plain-text extractor
-│   └── email-ui/            # Native desktop GUI (eframe / egui) with 3-pane layout and settings
+│   ├── email-html/          # HTML AST sanitizer, Markdown compiler, phishing detector, and plain-text extractor
+│   └── email-ui/            # Native desktop GUI (eframe / egui) with 3-pane layout, themes, command palette, and settings
 ```
 
 ---
@@ -83,11 +122,11 @@ sudo apt update
 sudo apt install build-essential pkg-config libssl-dev libdbus-1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 ```
 
-### 2. Build the Project
+### 2. Build & Test the Project
 
 ```bash
 # Clone repository
-git clone <repo-url>
+git clone git@github.com:AbhashTech/Email-Client.git
 cd Email-Application
 
 # Check workspace compilation
