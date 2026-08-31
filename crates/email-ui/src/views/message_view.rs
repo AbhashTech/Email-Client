@@ -1,7 +1,7 @@
 use crate::theme::AppTheme;
 use egui::{Color32, FontId, RichText, Rounding, ScrollArea, Sense, Stroke, Ui, Vec2};
 use email_core::events::SyncCommand;
-use email_core::models::MessageDetail;
+use email_core::models::{Folder, MessageDetail};
 use email_html::{parse_html_to_blocks, FormattedSpan, HtmlBlock, TextStyle};
 use tokio::sync::mpsc;
 
@@ -11,12 +11,14 @@ impl MessageViewPane {
     pub fn show(
         ui: &mut Ui,
         detail_opt: Option<&MessageDetail>,
+        folders: &[Folder],
         cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
         on_reply: &mut Option<MessageDetail>,
         on_reply_all: &mut Option<MessageDetail>,
         on_forward: &mut Option<MessageDetail>,
         on_delete: &mut Option<String>,
-        on_mark_unread: &mut Option<String>,
+        on_toggle_read: &mut Option<(String, bool)>,
+        on_move_folder: &mut Option<(String, String)>,
     ) {
         let Some(detail) = detail_opt else {
             ui.vertical_centered(|ui| {
@@ -49,11 +51,27 @@ impl MessageViewPane {
                 *on_forward = Some(detail.clone());
             }
 
-            ui.add_space(12.0);
+            ui.add_space(8.0);
 
-            if ui.button(RichText::new("✉ Unread").size(12.5)).clicked() {
-                *on_mark_unread = Some(msg.id.clone());
+            let read_label = if msg.is_read { "✉ Mark Unread" } else { "✉ Mark Read" };
+            if ui.button(RichText::new(read_label).size(12.5)).clicked() {
+                *on_toggle_read = Some((msg.id.clone(), !msg.is_read));
             }
+
+            ui.add_space(8.0);
+
+            // Move to Folder dropdown
+            egui::ComboBox::from_id_salt(format!("move_combo_{}", msg.id))
+                .selected_text(RichText::new("📁 Move to...").size(12.5))
+                .show_ui(ui, |ui| {
+                    for f in folders {
+                        if f.id != msg.folder_id {
+                            if ui.selectable_label(false, &f.display_name).clicked() {
+                                *on_move_folder = Some((msg.id.clone(), f.id.clone()));
+                            }
+                        }
+                    }
+                });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui

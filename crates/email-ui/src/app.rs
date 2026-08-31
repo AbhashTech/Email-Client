@@ -83,6 +83,9 @@ impl EmailApp {
         // If no accounts, open setup view immediately
         if app.accounts.is_empty() {
             app.account_setup_view.open();
+        } else {
+            // Auto-sync on startup
+            let _ = app.cmd_tx.send(SyncCommand::SyncAll);
         }
 
         app
@@ -375,6 +378,12 @@ impl App for EmailApp {
             let _ = self.storage.set_message_read(&msg_id, is_read);
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
                 m.is_read = is_read;
+                let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                    account_id: m.account_id.clone(),
+                    folder_id: m.folder_id.clone(),
+                    uid: m.uid,
+                    is_read,
+                });
             }
             if let Some(ref mut detail) = self.selected_message_detail {
                 if detail.header.id == msg_id {
@@ -388,6 +397,12 @@ impl App for EmailApp {
             let _ = self.storage.set_message_flagged(&msg_id, is_flag);
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
                 m.is_flagged = is_flag;
+                let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
+                    account_id: m.account_id.clone(),
+                    folder_id: m.folder_id.clone(),
+                    uid: m.uid,
+                    is_flagged: is_flag,
+                });
             }
             if let Some(ref mut detail) = self.selected_message_detail {
                 if detail.header.id == msg_id {
@@ -401,7 +416,15 @@ impl App for EmailApp {
             if let Some(ref mid) = self.selected_message_id {
                 let _ = self.storage.set_message_read(mid, true);
                 if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
-                    m.is_read = true;
+                    if !m.is_read {
+                        m.is_read = true;
+                        let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                            account_id: m.account_id.clone(),
+                            folder_id: m.folder_id.clone(),
+                            uid: m.uid,
+                            is_read: true,
+                        });
+                    }
                 }
                 if let Ok(detail_opt) = self.storage.get_message_detail(mid) {
                     self.selected_message_detail = detail_opt;
@@ -415,18 +438,30 @@ impl App for EmailApp {
         let mut on_reply_all = None;
         let mut on_forward = None;
         let mut on_delete = None;
-        let mut on_mark_unread = None;
+        let mut on_toggle_read_view = None;
+        let mut on_move_folder = None;
+
+        let active_folders = if let Some(ref detail) = self.selected_message_detail {
+            self.folders_by_account
+                .get(&detail.header.account_id)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         egui::CentralPanel::default().show(ctx, |ui| {
             MessageViewPane::show(
                 ui,
                 self.selected_message_detail.as_ref(),
+                &active_folders,
                 &self.cmd_tx,
                 &mut on_reply,
                 &mut on_reply_all,
                 &mut on_forward,
                 &mut on_delete,
-                &mut on_mark_unread,
+                &mut on_toggle_read_view,
+                &mut on_move_folder,
             );
         });
 
@@ -469,16 +504,53 @@ impl App for EmailApp {
             );
         }
 
-        if let Some(msg_id) = on_delete {
-            let _ = self.storage.delete_message(&msg_id);
-            self.selected_message_id = None;
-            self.selected_message_detail = None;
-            self.reload_messages();
+        if let Some((msg_id, is_read)) = on_toggle_read_view {
+            let _ = self.storage.set_message_read(&msg_id, is_read);
+            if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
+                m.is_read = is_read;
+                let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                    account_id: m.account_id.clone(),
+                    folder_id: m.folder_id.clone(),
+                    uid: m.uid,
+                    is_read,
+                });
+            }
+            if let Some(ref mut detail) = self.selected_message_detail {
+                if detail.header.id == msg_id {
+                    detail.header.is_read = is_read;
+                }
+            }
+            self.reload_data();
         }
 
-        if let Some(msg_id) = on_mark_unread {
-            let _ = self.storage.set_message_read(&msg_id, false);
-            self.reload_messages();
+        if let Some((msg_id, target_folder_id)) = on_move_folder {
+            if let Some(m) = self.messages.iter().find(|m| m.id == msg_id).cloned() {
+                let _ = self.storage.move_message_to_folder(&msg_id, &target_folder_id);
+                let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
+                    account_id: m.account_id,
+                    source_folder_id: m.folder_id,
+                    target_folder_id,
+                    uid: m.uid,
+                    message_id: msg_id.clone(),
+                });
+            }
+            self.selected_message_id = None;
+            self.selected_message_detail = None;
+            self.reload_data();
+        }
+
+        if let Some(msg_id) = on_delete {
+            if let Some(m) = self.messages.iter().find(|m| m.id == msg_id).cloned() {
+                let _ = self.storage.delete_message(&msg_id);
+                let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
+                    account_id: m.account_id,
+                    folder_id: m.folder_id,
+                    uid: m.uid,
+                });
+            }
+            self.selected_message_id = None;
+            self.selected_message_detail = None;
+            self.reload_data();
         }
 
         // Modals

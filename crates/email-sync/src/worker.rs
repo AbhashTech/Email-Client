@@ -331,16 +331,111 @@ impl SyncWorker {
                 });
             }
 
-            SyncCommand::SetReadStatus { .. } => {
-                // Handled via storage update
+            SyncCommand::SetReadStatus {
+                account_id,
+                folder_id,
+                uid,
+                is_read,
+            } => {
+                if uid > 0 {
+                    if let Ok(account) = storage.get_account(&account_id) {
+                        if let Ok(password) = keyring.get_credential(&account.credential_key) {
+                            if let Ok(folders) = storage.get_folders_for_account(&account.id) {
+                                if let Some(folder) = folders.iter().find(|f| f.id == folder_id) {
+                                    if let Ok(mut session) = connect_imap(&account, &password).await {
+                                        if session.select(&folder.remote_name).await.is_ok() {
+                                            let flag_op = if is_read { "+FLAGS (\\Seen)" } else { "-FLAGS (\\Seen)" };
+                                            let _ = session.uid_store(format!("{}", uid), flag_op).await;
+                                        }
+                                        let _ = session.logout().await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            SyncCommand::SetFlaggedStatus { .. } => {
-                // Handled via storage update
+            SyncCommand::SetFlaggedStatus {
+                account_id,
+                folder_id,
+                uid,
+                is_flagged,
+            } => {
+                if uid > 0 {
+                    if let Ok(account) = storage.get_account(&account_id) {
+                        if let Ok(password) = keyring.get_credential(&account.credential_key) {
+                            if let Ok(folders) = storage.get_folders_for_account(&account.id) {
+                                if let Some(folder) = folders.iter().find(|f| f.id == folder_id) {
+                                    if let Ok(mut session) = connect_imap(&account, &password).await {
+                                        if session.select(&folder.remote_name).await.is_ok() {
+                                            let flag_op = if is_flagged { "+FLAGS (\\Flagged)" } else { "-FLAGS (\\Flagged)" };
+                                            let _ = session.uid_store(format!("{}", uid), flag_op).await;
+                                        }
+                                        let _ = session.logout().await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            SyncCommand::DeleteMessage { .. } => {
-                // Handled via storage update
+            SyncCommand::DeleteMessage {
+                account_id,
+                folder_id,
+                uid,
+            } => {
+                if uid > 0 {
+                    if let Ok(account) = storage.get_account(&account_id) {
+                        if let Ok(password) = keyring.get_credential(&account.credential_key) {
+                            if let Ok(folders) = storage.get_folders_for_account(&account.id) {
+                                if let Some(folder) = folders.iter().find(|f| f.id == folder_id) {
+                                    if let Ok(mut session) = connect_imap(&account, &password).await {
+                                        if session.select(&folder.remote_name).await.is_ok() {
+                                            let _ = session.uid_store(format!("{}", uid), "+FLAGS (\\Deleted)").await;
+                                            let _ = session.expunge().await;
+                                        }
+                                        let _ = session.logout().await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SyncCommand::MoveMessage {
+                account_id,
+                source_folder_id,
+                target_folder_id,
+                uid,
+                message_id: _,
+            } => {
+                if uid > 0 {
+                    if let Ok(account) = storage.get_account(&account_id) {
+                        if let Ok(password) = keyring.get_credential(&account.credential_key) {
+                            if let Ok(folders) = storage.get_folders_for_account(&account.id) {
+                                let source_folder = folders.iter().find(|f| f.id == source_folder_id);
+                                let target_folder = folders.iter().find(|f| f.id == target_folder_id);
+                                if let (Some(src), Some(tgt)) = (source_folder, target_folder) {
+                                    if let Ok(mut session) = connect_imap(&account, &password).await {
+                                        if session.select(&src.remote_name).await.is_ok() {
+                                            let uid_str = format!("{}", uid);
+                                            let move_res = session.uid_mv(&uid_str, &tgt.remote_name).await;
+                                            if move_res.is_err() {
+                                                let _ = session.uid_copy(&uid_str, &tgt.remote_name).await;
+                                                let _ = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await;
+                                                let _ = session.expunge().await;
+                                            }
+                                        }
+                                        let _ = session.logout().await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

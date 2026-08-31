@@ -673,6 +673,16 @@ impl Storage {
         Ok(())
     }
 
+    pub fn move_message_to_folder(&self, message_id: &str, target_folder_id: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            "UPDATE messages SET folder_id = ?1 WHERE id = ?2",
+            params![target_folder_id, message_id],
+        )
+        .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     // ==========================================
     // Attachments
     // ==========================================
@@ -1025,6 +1035,13 @@ mod tests {
         let updated_msg = msgs_updated.iter().find(|m| m.uid == 102).unwrap();
         assert!(updated_msg.is_read);
         assert!(updated_msg.is_flagged);
+
+        // 9. Test move_message_to_folder
+        storage.move_message_to_folder("msg-456", &folder2.id).unwrap();
+        let msgs_folder1 = storage.get_messages(Some(&account.id), Some(&folder1.id), 10, 0, None).unwrap();
+        assert!(!msgs_folder1.iter().any(|m| m.id == "msg-456"));
+        let msgs_folder2 = storage.get_messages(Some(&account.id), Some(&folder2.id), 10, 0, None).unwrap();
+        assert!(msgs_folder2.iter().any(|m| m.id == "msg-456"));
     }
 }
 

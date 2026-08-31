@@ -47,6 +47,14 @@ pub enum SyncCommand {
         folder_id: String,
         uid: u32,
     },
+    /// Move message to target folder on server
+    MoveMessage {
+        account_id: String,
+        source_folder_id: String,
+        target_folder_id: String,
+        uid: u32,
+        message_id: String,
+    },
 }
 
 #[derive(Debug, Clone)]
