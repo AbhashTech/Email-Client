@@ -15,6 +15,7 @@ impl MessageViewPane {
         folders: &[Folder],
         cmd_tx: &mpsc::UnboundedSender<SyncCommand>,
         on_reply: &mut Option<MessageDetail>,
+        on_reply_plain: &mut Option<MessageDetail>,
         on_reply_all: &mut Option<MessageDetail>,
         on_forward: &mut Option<MessageDetail>,
         on_delete: &mut Option<String>,
@@ -43,13 +44,16 @@ impl MessageViewPane {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            if ui.button(RichText::new("↩ Reply").size(12.5)).clicked() {
+            if ui.button(RichText::new("↩ Reply").size(12.5)).on_hover_text("Reply (HTML format by default)").clicked() {
                 *on_reply = Some(detail.clone());
             }
-            if ui.button(RichText::new("👥 Reply All").size(12.5)).clicked() {
+            if ui.button(RichText::new("📝 Text Reply").size(12.5)).on_hover_text("Reply in plain text format only").clicked() {
+                *on_reply_plain = Some(detail.clone());
+            }
+            if ui.button(RichText::new("👥 Reply All").size(12.5)).on_hover_text("Reply to all recipients").clicked() {
                 *on_reply_all = Some(detail.clone());
             }
-            if ui.button(RichText::new("➡ Forward").size(12.5)).clicked() {
+            if ui.button(RichText::new("➡ Forward").size(12.5)).on_hover_text("Forward message").clicked() {
                 *on_forward = Some(detail.clone());
             }
 

@@ -244,7 +244,7 @@ impl App for EmailApp {
                 .rounding(Rounding::same(6.0));
 
                 if ui.add(compose_btn).clicked() {
-                    self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()));
+                    self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
                 }
 
                 if ui.button(RichText::new("🔄 Sync All").size(12.5)).clicked() {
@@ -437,6 +437,7 @@ impl App for EmailApp {
 
         // 3. Central Reading Pane
         let mut on_reply = None;
+        let mut on_reply_plain = None;
         let mut on_reply_all = None;
         let mut on_forward = None;
         let mut on_delete = None;
@@ -460,6 +461,7 @@ impl App for EmailApp {
                 &active_folders,
                 &self.cmd_tx,
                 &mut on_reply,
+                &mut on_reply_plain,
                 &mut on_reply_all,
                 &mut on_forward,
                 &mut on_delete,
@@ -483,6 +485,21 @@ impl App for EmailApp {
                 &detail.header.subject,
                 detail.header.message_id,
                 &quote,
+                &self.signatures,
+                true,
+            );
+        }
+
+        if let Some(detail) = on_reply_plain {
+            let quote = detail.body_plain.unwrap_or_default();
+            self.compose_view.open_reply(
+                &detail.header.account_id,
+                &detail.header.from_address,
+                &detail.header.subject,
+                detail.header.message_id,
+                &quote,
+                &self.signatures,
+                false,
             );
         }
 
@@ -498,6 +515,8 @@ impl App for EmailApp {
                 &detail.header.subject,
                 detail.header.message_id,
                 &quote,
+                &self.signatures,
+                true,
             );
         }
 
@@ -510,6 +529,8 @@ impl App for EmailApp {
                 &subj,
                 None,
                 &format!("---------- Forwarded message ---------\nFrom: {}\nSubject: {}\n\n{}", detail.header.from_address, detail.header.subject, quote),
+                &self.signatures,
+                true,
             );
         }
 

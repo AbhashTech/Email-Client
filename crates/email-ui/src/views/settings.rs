@@ -356,10 +356,11 @@ impl SettingsView {
             if self.new_sig_name.trim().is_empty() {
                 self.status_msg = Some((false, "Signature name cannot be empty.".to_string()));
             } else {
+                let sanitized_html = email_html::sanitize_raw_html(&self.new_sig_html);
                 let sig = Signature::new(
                     accounts.first().map(|a| a.id.clone()),
                     self.new_sig_name.clone(),
-                    self.new_sig_html.clone(),
+                    sanitized_html,
                     self.new_sig_is_default,
                 );
                 let _ = storage.save_signature(&sig);

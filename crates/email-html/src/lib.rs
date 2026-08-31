@@ -63,7 +63,7 @@ static BR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)<br\s*/?>").unwrap()
 });
 
-fn sanitize_raw_html(html: &str) -> String {
+pub fn sanitize_raw_html(html: &str) -> String {
     let s0 = COMMENT_RE.replace_all(html, "");
     let s1 = SCRIPT_RE.replace_all(&s0, "");
     let s2 = STYLE_RE.replace_all(&s1, "");
