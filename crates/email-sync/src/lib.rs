@@ -87,6 +87,7 @@ Content-Type: text/html; charset=utf-8\r\n\
             is_deleted: false,
             body_fetched: false,
             size_bytes: raw_email.len() as u64,
+            snooze_until: None,
         };
 
         let parsed = parse_full_mime_and_enrich_header(raw_email, &mut header).unwrap();

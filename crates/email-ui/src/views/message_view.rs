@@ -1,4 +1,5 @@
 use base64::Engine;
+use chrono::Datelike;
 use crate::theme::AppTheme;
 use egui::{Color32, FontId, RichText, Rounding, ScrollArea, Sense, Stroke, Ui, Vec2};
 use email_core::events::SyncCommand;
@@ -23,6 +24,7 @@ impl MessageViewPane {
         on_delete: &mut Option<String>,
         on_toggle_read: &mut Option<(String, bool)>,
         on_move_folder: &mut Option<(String, String)>,
+        on_snooze: &mut Option<(String, Option<i64>)>,
         status_toast: &mut Option<String>,
     ) {
         let Some(detail) = detail_opt else {
@@ -74,6 +76,63 @@ impl MessageViewPane {
             if ui.button(RichText::new(read_label).size(12.0)).clicked() {
                 *on_toggle_read = Some((msg.id.clone(), !msg.is_read));
             }
+
+            // Snooze Dropdown
+            let snooze_title = if msg.is_snoozed() { "💤 Snoozed ▾" } else { "💤 Snooze ▾" };
+            egui::ComboBox::from_id_salt(format!("snooze_combo_{}", msg.id))
+                .selected_text(RichText::new(snooze_title).size(12.0))
+                .show_ui(ui, |ui| {
+                    let now = chrono::Utc::now();
+                    if msg.is_snoozed() {
+                        if ui.button(RichText::new("⏰ Unsnooze (Move to Inbox)").size(12.0).color(AppTheme::ACCENT_PRIMARY)).clicked() {
+                            *on_snooze = Some((msg.id.clone(), None));
+                            *status_toast = Some("Message unsnoozed and returned to Inbox".to_string());
+                        }
+                        ui.separator();
+                    }
+
+                    // Later Today (in 3 hours)
+                    let in_3h = now.timestamp() + 3 * 3600;
+                    if ui.button(RichText::new("⏰ Later Today (in 3 hours)").size(12.0)).clicked() {
+                        *on_snooze = Some((msg.id.clone(), Some(in_3h)));
+                        *status_toast = Some("Snoozed for 3 hours".to_string());
+                    }
+
+                    // Tomorrow Morning (9:00 AM)
+                    let tomorrow_morning = (now.date_naive() + chrono::Days::new(1))
+                        .and_hms_opt(9, 0, 0)
+                        .unwrap()
+                        .and_utc()
+                        .timestamp();
+                    if ui.button(RichText::new("🌅 Tomorrow Morning (9:00 AM)").size(12.0)).clicked() {
+                        *on_snooze = Some((msg.id.clone(), Some(tomorrow_morning)));
+                        *status_toast = Some("Snoozed until tomorrow 9:00 AM".to_string());
+                    }
+
+                    // Tomorrow Evening (6:00 PM)
+                    let tomorrow_evening = (now.date_naive() + chrono::Days::new(1))
+                        .and_hms_opt(18, 0, 0)
+                        .unwrap()
+                        .and_utc()
+                        .timestamp();
+                    if ui.button(RichText::new("🌆 Tomorrow Evening (6:00 PM)").size(12.0)).clicked() {
+                        *on_snooze = Some((msg.id.clone(), Some(tomorrow_evening)));
+                        *status_toast = Some("Snoozed until tomorrow 6:00 PM".to_string());
+                    }
+
+                    // Next Week (Next Monday 9:00 AM)
+                    let days_until_mon = (8 - now.weekday().num_days_from_monday()) % 7;
+                    let days_to_add = if days_until_mon == 0 { 7 } else { days_until_mon };
+                    let next_monday = (now.date_naive() + chrono::Days::new(days_to_add as u64))
+                        .and_hms_opt(9, 0, 0)
+                        .unwrap()
+                        .and_utc()
+                        .timestamp();
+                    if ui.button(RichText::new("📅 Next Week (Monday 9:00 AM)").size(12.0)).clicked() {
+                        *on_snooze = Some((msg.id.clone(), Some(next_monday)));
+                        *status_toast = Some("Snoozed until next Monday 9:00 AM".to_string());
+                    }
+                });
 
             // Move to Folder dropdown
             egui::ComboBox::from_id_salt(format!("move_combo_{}", msg.id))
@@ -189,6 +248,28 @@ impl MessageViewPane {
             .hscroll(true)
             .vscroll(true)
             .show(ui, |ui| {
+            if let Some(snooze_ts) = msg.snooze_until {
+                if snooze_ts > chrono::Utc::now().timestamp() {
+                    let dt = chrono::DateTime::from_timestamp(snooze_ts, 0).unwrap_or_default();
+                    let formatted = dt.format("%a, %b %e at %I:%M %p").to_string();
+                    egui::Frame::none()
+                        .fill(AppTheme::BG_CARD)
+                        .stroke(Stroke::new(1.0_f32, AppTheme::ACCENT_WARNING))
+                        .rounding(Rounding::same(6.0))
+                        .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("💤 Snoozed until {}", formatted)).size(12.5).strong().color(AppTheme::ACCENT_WARNING));
+                                if ui.button(RichText::new("Unsnooze").size(11.5)).clicked() {
+                                    *on_snooze = Some((msg.id.clone(), None));
+                                    *status_toast = Some("Message unsnoozed and returned to Inbox".to_string());
+                                }
+                            });
+                        });
+                    ui.add_space(8.0);
+                }
+            }
+
             // 2. Email Subject Title
             let subj = if msg.subject.is_empty() {
                 "(No Subject)"
@@ -880,6 +961,7 @@ mod tests {
                 is_deleted: false,
                 body_fetched: true,
                 size_bytes: 4096,
+                snooze_until: None,
             },
             body_plain: Some("Hello team,\n\nHere is the financial summary for Q3.\nRevenue grew by 24%.\n\nBest,\nFinance".to_string()),
             body_html: Some("<p>Hello team,</p><p>Here is the financial summary for Q3.</p><p>Revenue grew by 24%.</p><p>Best,<br>Finance</p>".to_string()),

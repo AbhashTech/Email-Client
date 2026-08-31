@@ -171,6 +171,11 @@ impl EmailApp {
         };
 
         match &self.selected_folder {
+            FolderSelection::UnifiedSnoozed => {
+                if let Ok(msgs) = self.storage.get_snoozed_messages(None) {
+                    self.messages = msgs;
+                }
+            }
             FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
                 if let Ok(mut msgs) = self.storage.get_messages(None, None, 500, 0, search) {
                     if matches!(self.selected_folder, FolderSelection::UnifiedFlagged) {
@@ -296,6 +301,24 @@ impl EmailApp {
         }
 
         self.check_scheduled_queue();
+        self.check_snoozed_queue();
+    }
+
+    pub fn check_snoozed_queue(&mut self) {
+        let now_ts = chrono::Utc::now().timestamp();
+        if let Ok(due_snoozed) = self.storage.get_due_snoozed_messages(now_ts) {
+            let count = due_snoozed.len();
+            for msg in due_snoozed {
+                let _ = self.storage.unsnooze_message(&msg.id);
+            }
+            if count > 0 {
+                self.status_toast = Some((
+                    format!("🔔 {} snoozed email(s) returned to your Inbox!", count),
+                    std::time::Instant::now(),
+                ));
+                self.reload_data();
+            }
+        }
     }
 
     pub fn handle_close_requested(&mut self, ctx: &egui::Context) {
@@ -1074,6 +1097,7 @@ impl App for EmailApp {
         let mut on_delete = None;
         let mut on_toggle_read_view = None;
         let mut on_move_folder = None;
+        let mut on_snooze = None;
         let mut on_status_toast = None;
 
         let active_folders = if let Some(ref detail) = self.selected_message_detail {
@@ -1100,6 +1124,7 @@ impl App for EmailApp {
                 &mut on_delete,
                 &mut on_toggle_read_view,
                 &mut on_move_folder,
+                &mut on_snooze,
                 &mut on_status_toast,
             );
         });
@@ -1222,6 +1247,16 @@ impl App for EmailApp {
             }
             self.selected_message_id = None;
             self.selected_message_detail = None;
+            self.reload_data();
+        }
+
+        if let Some((msg_id, snooze_until)) = on_snooze {
+            let _ = self.storage.snooze_message(&msg_id, snooze_until);
+            if let Some(ref mut detail) = self.selected_message_detail {
+                if detail.header.id == msg_id {
+                    detail.header.snooze_until = snooze_until;
+                }
+            }
             self.reload_data();
         }
 

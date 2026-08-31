@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub enum FolderSelection {
     UnifiedFlagged,
     UnifiedUnread,
+    UnifiedSnoozed,
     Folder { account_id: String, folder_id: String },
 }
 
@@ -94,6 +95,16 @@ impl SidebarView {
                         total_unread_count,
                         matches!(selected, FolderSelection::UnifiedUnread),
                         || *selected = FolderSelection::UnifiedUnread,
+                        None::<fn(Vec<String>)>,
+                    );
+
+                    Self::render_folder_item(
+                        ui,
+                        "💤",
+                        "Snoozed",
+                        0,
+                        matches!(selected, FolderSelection::UnifiedSnoozed),
+                        || *selected = FolderSelection::UnifiedSnoozed,
                         None::<fn(Vec<String>)>,
                     );
 

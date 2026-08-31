@@ -290,9 +290,18 @@ pub struct MessageHeader {
     pub is_deleted: bool,
     pub body_fetched: bool,
     pub size_bytes: u64,
+    pub snooze_until: Option<i64>,
 }
 
 impl MessageHeader {
+    pub fn is_snoozed(&self) -> bool {
+        if let Some(ts) = self.snooze_until {
+            ts > Utc::now().timestamp()
+        } else {
+            false
+        }
+    }
+
     pub fn formatted_date(&self) -> String {
         if self.date_epoch == 0 {
             return "".to_string();

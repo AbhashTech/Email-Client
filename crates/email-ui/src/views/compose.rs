@@ -753,6 +753,7 @@ mod tests {
             is_deleted: false,
             body_fetched: true,
             size_bytes: 1024,
+            snooze_until: None,
         };
 
         let (to, cc) = build_reply_all_recipients(&header, &my_emails);

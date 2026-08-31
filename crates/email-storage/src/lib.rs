@@ -481,8 +481,8 @@ impl Storage {
                     id, account_id, folder_id, uid, message_id, in_reply_to,
                     subject, from_name, from_address, to_recipients_json, cc_recipients_json,
                     date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
-                    body_fetched, size_bytes
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                    body_fetched, size_bytes, snooze_until
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                 ON CONFLICT(folder_id, uid) DO UPDATE SET
                     id=excluded.id,
                     subject=excluded.subject,
@@ -497,7 +497,8 @@ impl Storage {
                     is_draft=excluded.is_draft,
                     is_deleted=excluded.is_deleted,
                     body_fetched=excluded.body_fetched,
-                    size_bytes=excluded.size_bytes
+                    size_bytes=excluded.size_bytes,
+                    snooze_until=coalesce(messages.snooze_until, excluded.snooze_until)
                 "#
             ).map_err(|e| EmailError::Database(e.to_string()))?;
 
@@ -526,6 +527,7 @@ impl Storage {
                     if m.is_deleted { 1 } else { 0 },
                     if m.body_fetched { 1 } else { 0 },
                     m.size_bytes as i64,
+                    m.snooze_until,
                 ]).map_err(|e| EmailError::Database(e.to_string()))?;
             }
         }
@@ -547,17 +549,18 @@ impl Storage {
             }
         }
 
+        let now_ts = chrono::Utc::now().timestamp();
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
 
         let mut query = String::from(
             "SELECT id, account_id, folder_id, uid, message_id, in_reply_to,
                     subject, from_name, from_address, to_recipients_json, cc_recipients_json,
                     date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
-                    body_fetched, size_bytes
-             FROM messages WHERE is_deleted = 0",
+                    body_fetched, size_bytes, snooze_until
+             FROM messages WHERE is_deleted = 0 AND (snooze_until IS NULL OR snooze_until <= ?1)",
         );
 
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now_ts)];
 
         if let Some(fid) = folder_id {
             query.push_str(" AND folder_id = ?");
@@ -607,6 +610,7 @@ impl Storage {
                     is_deleted: is_deleted == 1,
                     body_fetched: body_fetched == 1,
                     size_bytes: size_bytes as u64,
+                    snooze_until: row.get(19)?,
                 })
             })
             .map_err(|e| EmailError::Database(e.to_string()))?;
@@ -626,6 +630,7 @@ impl Storage {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<MessageHeader>> {
+        let now_ts = chrono::Utc::now().timestamp();
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
         let parsed = parse_search_query(search_query);
 
@@ -666,7 +671,7 @@ impl Storage {
             SELECT m.id, m.account_id, m.folder_id, m.uid, m.message_id, m.in_reply_to,
                    m.subject, m.from_name, m.from_address, m.to_recipients_json, m.cc_recipients_json,
                    m.date_epoch, m.snippet, m.is_read, m.is_flagged, m.is_draft, m.is_deleted,
-                   m.body_fetched, m.size_bytes
+                   m.body_fetched, m.size_bytes, m.snooze_until
             FROM messages m
             "#,
         );
@@ -677,9 +682,11 @@ impl Storage {
             let match_expr = fts_clauses.join(" AND ");
             query.push_str(" JOIN messages_fts f ON f.message_id = m.id WHERE messages_fts MATCH ?");
             params_vec.push(Box::new(match_expr));
-            query.push_str(" AND m.is_deleted = 0");
+            query.push_str(" AND m.is_deleted = 0 AND (m.snooze_until IS NULL OR m.snooze_until <= ?)");
+            params_vec.push(Box::new(now_ts));
         } else {
-            query.push_str(" WHERE m.is_deleted = 0");
+            query.push_str(" WHERE m.is_deleted = 0 AND (m.snooze_until IS NULL OR m.snooze_until <= ?)");
+            params_vec.push(Box::new(now_ts));
         }
 
         if let Some(fid) = folder_id {
@@ -753,6 +760,7 @@ impl Storage {
                     is_deleted: is_deleted == 1,
                     body_fetched: body_fetched == 1,
                     size_bytes: size_bytes as u64,
+                    snooze_until: row.get(19)?,
                 })
             })
             .map_err(|e| EmailError::Database(e.to_string()))?;
@@ -764,13 +772,147 @@ impl Storage {
         Ok(messages)
     }
 
+    pub fn snooze_message(&self, message_id: &str, snooze_until: Option<i64>) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            "UPDATE messages SET snooze_until = ?1 WHERE id = ?2",
+            params![snooze_until, message_id],
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn unsnooze_message(&self, message_id: &str) -> Result<()> {
+        self.snooze_message(message_id, None)
+    }
+
+    pub fn get_due_snoozed_messages(&self, now_ts: i64) -> Result<Vec<MessageHeader>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, account_id, folder_id, uid, message_id, in_reply_to,
+                   subject, from_name, from_address, to_recipients_json, cc_recipients_json,
+                   date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
+                   body_fetched, size_bytes, snooze_until
+            FROM messages
+            WHERE snooze_until IS NOT NULL AND snooze_until <= ?1 AND is_deleted = 0
+            "#,
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt.query_map(params![now_ts], |row| {
+            let to_json: String = row.get(9)?;
+            let cc_json: String = row.get(10)?;
+            let to_recipients: Vec<Recipient> = serde_json::from_str(&to_json).unwrap_or_default();
+            let cc_recipients: Vec<Recipient> = serde_json::from_str(&cc_json).unwrap_or_default();
+            let is_read: i32 = row.get(13)?;
+            let is_flagged: i32 = row.get(14)?;
+            let is_draft: i32 = row.get(15)?;
+            let is_deleted: i32 = row.get(16)?;
+            let body_fetched: i32 = row.get(17)?;
+            let size_bytes: i64 = row.get(18)?;
+
+            Ok(MessageHeader {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                folder_id: row.get(2)?,
+                uid: row.get(3)?,
+                message_id: row.get(4)?,
+                in_reply_to: row.get(5)?,
+                subject: row.get(6)?,
+                from_name: row.get(7)?,
+                from_address: row.get(8)?,
+                to_recipients,
+                cc_recipients,
+                date_epoch: row.get(11)?,
+                snippet: row.get(12)?,
+                is_read: is_read == 1,
+                is_flagged: is_flagged == 1,
+                is_draft: is_draft == 1,
+                is_deleted: is_deleted == 1,
+                body_fetched: body_fetched == 1,
+                size_bytes: size_bytes as u64,
+                snooze_until: row.get(19)?,
+            })
+        }).map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| EmailError::Database(e.to_string()))?);
+        }
+        Ok(list)
+    }
+
+    pub fn get_snoozed_messages(&self, account_id: Option<&str>) -> Result<Vec<MessageHeader>> {
+        let now_ts = chrono::Utc::now().timestamp();
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut query = String::from(
+            r#"
+            SELECT id, account_id, folder_id, uid, message_id, in_reply_to,
+                   subject, from_name, from_address, to_recipients_json, cc_recipients_json,
+                   date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
+                   body_fetched, size_bytes, snooze_until
+            FROM messages
+            WHERE snooze_until IS NOT NULL AND snooze_until > ?1 AND is_deleted = 0
+            "#,
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now_ts)];
+        if let Some(aid) = account_id {
+            query.push_str(" AND account_id = ?2");
+            params_vec.push(Box::new(aid.to_string()));
+        }
+        query.push_str(" ORDER BY snooze_until ASC");
+
+        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&query).map_err(|e| EmailError::Database(e.to_string()))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_slice), |row| {
+            let to_json: String = row.get(9)?;
+            let cc_json: String = row.get(10)?;
+            let to_recipients: Vec<Recipient> = serde_json::from_str(&to_json).unwrap_or_default();
+            let cc_recipients: Vec<Recipient> = serde_json::from_str(&cc_json).unwrap_or_default();
+            let is_read: i32 = row.get(13)?;
+            let is_flagged: i32 = row.get(14)?;
+            let is_draft: i32 = row.get(15)?;
+            let is_deleted: i32 = row.get(16)?;
+            let body_fetched: i32 = row.get(17)?;
+            let size_bytes: i64 = row.get(18)?;
+
+            Ok(MessageHeader {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                folder_id: row.get(2)?,
+                uid: row.get(3)?,
+                message_id: row.get(4)?,
+                in_reply_to: row.get(5)?,
+                subject: row.get(6)?,
+                from_name: row.get(7)?,
+                from_address: row.get(8)?,
+                to_recipients,
+                cc_recipients,
+                date_epoch: row.get(11)?,
+                snippet: row.get(12)?,
+                is_read: is_read == 1,
+                is_flagged: is_flagged == 1,
+                is_draft: is_draft == 1,
+                is_deleted: is_deleted == 1,
+                body_fetched: body_fetched == 1,
+                size_bytes: size_bytes as u64,
+                snooze_until: row.get(19)?,
+            })
+        }).map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| EmailError::Database(e.to_string()))?);
+        }
+        Ok(list)
+    }
+
     pub fn get_message_detail(&self, message_id: &str) -> Result<Option<MessageDetail>> {
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
         let result = conn.query_row(
             "SELECT id, account_id, folder_id, uid, message_id, in_reply_to,
                     subject, from_name, from_address, to_recipients_json, cc_recipients_json,
                     date_epoch, snippet, is_read, is_flagged, is_draft, is_deleted,
-                    body_plain, body_html, body_fetched, size_bytes
+                    body_plain, body_html, body_fetched, size_bytes, snooze_until
              FROM messages WHERE id = ?1",
             params![message_id],
             |row| {
@@ -807,6 +949,7 @@ impl Storage {
                     is_deleted: is_deleted == 1,
                     body_fetched: body_fetched == 1,
                     size_bytes: size_bytes as u64,
+                    snooze_until: row.get(21)?,
                 };
 
                 Ok((header, body_plain, body_html))
@@ -1378,6 +1521,7 @@ mod tests {
             is_deleted: false,
             body_fetched: false,
             size_bytes: 2048,
+            snooze_until: None,
         };
         storage.save_message_headers(&[header.clone()]).unwrap();
 
@@ -1431,6 +1575,7 @@ mod tests {
             is_deleted: false,
             body_fetched: true,
             size_bytes: 4096,
+            snooze_until: None,
         };
         let att2 = Attachment {
             id: "att-1".to_string(),
@@ -1631,6 +1776,7 @@ mod tests {
             is_deleted: false,
             body_fetched: true,
             size_bytes: 4096,
+            snooze_until: None,
         };
 
         let msg2 = MessageHeader {
@@ -1653,6 +1799,7 @@ mod tests {
             is_deleted: false,
             body_fetched: true,
             size_bytes: 2048,
+            snooze_until: None,
         };
 
         storage.save_message_headers(&[msg1.clone(), msg2.clone()]).unwrap();
@@ -1678,6 +1825,82 @@ mod tests {
         let res4 = storage.search_messages_fts(Some(&account.id), None, "is:unread", 10, 0).unwrap();
         assert_eq!(res4.len(), 1);
         assert_eq!(res4[0].id, "msg_fts_2");
+    }
+
+    #[test]
+    fn test_snooze_and_unsnooze_flow() {
+        let storage = Storage::new_in_memory().unwrap();
+        let account = Account::new(
+            "Snooze Test".to_string(),
+            "snooze@example.com".to_string(),
+            "imap.example.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.example.com".to_string(),
+            587,
+            SecurityType::StartTls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let folder = Folder::new(
+            account.id.clone(),
+            "INBOX".to_string(),
+            "Inbox".to_string(),
+            "/".to_string(),
+            vec!["\\Inbox".to_string()],
+            true,
+        );
+        storage.save_folders(&[folder.clone()]).unwrap();
+
+        let msg = MessageHeader {
+            id: "msg_snooze_1".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder.id.clone(),
+            uid: 201,
+            message_id: Some("snooze1@example.com".to_string()),
+            in_reply_to: None,
+            subject: "Reminder: Review Security Architecture".to_string(),
+            from_name: Some("Security Officer".to_string()),
+            from_address: "sec@example.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Kunal".to_string()), "kunal@example.com".to_string())],
+            cc_recipients: Vec::new(),
+            date_epoch: 1700000000,
+            snippet: "Please audit the firewall configuration.".to_string(),
+            is_read: false,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 1024,
+            snooze_until: None,
+        };
+
+        storage.save_message_headers(&[msg.clone()]).unwrap();
+
+        // Initially in standard get_messages
+        let initial = storage.get_messages(Some(&account.id), None, 10, 0, None).unwrap();
+        assert_eq!(initial.len(), 1);
+
+        // Snooze until 1 hour in the future
+        let future_time = chrono::Utc::now().timestamp() + 3600;
+        storage.snooze_message(&msg.id, Some(future_time)).unwrap();
+
+        // Should now be hidden from standard inbox query
+        let active = storage.get_messages(Some(&account.id), None, 10, 0, None).unwrap();
+        assert_eq!(active.len(), 0);
+
+        // Should appear in get_snoozed_messages
+        let snoozed = storage.get_snoozed_messages(Some(&account.id)).unwrap();
+        assert_eq!(snoozed.len(), 1);
+        assert_eq!(snoozed[0].id, "msg_snooze_1");
+
+        // Unsnooze
+        storage.unsnooze_message(&msg.id).unwrap();
+        let restored = storage.get_messages(Some(&account.id), None, 10, 0, None).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].id, "msg_snooze_1");
     }
 }
 

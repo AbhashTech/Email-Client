@@ -280,6 +280,7 @@ impl SyncWorker {
                         is_deleted: false,
                         body_fetched: true,
                         size_bytes: 0,
+                        snooze_until: None,
                     }
                 };
 

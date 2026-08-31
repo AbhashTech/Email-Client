@@ -53,6 +53,18 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
+### 💤 Snooze & Remind Later
+- **Convenient Presets (`[💤 Snooze ▾]`)**: Temporarily hide incoming emails from your inbox until a chosen time:
+  - `⏰ Later Today (+3 hours)`
+  - `🌅 Tomorrow Morning (9:00 AM)`
+  - `🌆 Tomorrow Evening (6:00 PM)`
+  - `📅 Next Week (Monday 9:00 AM)`
+- **`💤 Snoozed` Virtual Mailbox**: Dedicated smart view in the left sidebar to browse and manage all active snoozed emails.
+- **Visual Snooze Warning Banner**: Informative indicator on snoozed emails with a 1-click `[Unsnooze]` action to immediately restore emails to your Inbox.
+- **Automated Background Dispatcher**: Background queue engine monitors due timestamps and automatically restores emails to your Inbox with a live toast notification.
+
+---
+
 ### 📝 Composer, Drafts, Scheduled Send & Undo Send
 - **💾 Save as Draft (`💾 Save Draft`)**: Persist in-progress emails (recipients, format, subject, body, signature) to local SQLite storage. Re-open and edit drafts directly from the reading pane (`[✏ Edit Draft]`).
 - **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.

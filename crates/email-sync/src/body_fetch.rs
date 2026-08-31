@@ -325,6 +325,7 @@ mod tests {
             is_deleted: false,
             body_fetched: false,
             size_bytes: 0,
+            snooze_until: None,
         };
 
         let res = parse_full_mime_and_enrich_header(raw_email, &mut header).unwrap();
@@ -370,6 +371,7 @@ mod tests {
             is_deleted: false,
             body_fetched: false,
             size_bytes: 0,
+            snooze_until: None,
         };
 
         let _ = parse_full_mime_and_enrich_header(raw_email, &mut header).unwrap();

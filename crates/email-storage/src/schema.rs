@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS messages (
     body_html TEXT,
     body_fetched INTEGER NOT NULL DEFAULT 0,
     size_bytes INTEGER NOT NULL DEFAULT 0,
+    snooze_until INTEGER,
     UNIQUE(folder_id, uid)
 );
 
@@ -124,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(subject, from_address
 CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_account ON drafts(account_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_emails(send_at_timestamp ASC);
+CREATE INDEX IF NOT EXISTS idx_messages_snooze ON messages(snooze_until);
 
 -- FTS5 Full-Text Search Virtual Table
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

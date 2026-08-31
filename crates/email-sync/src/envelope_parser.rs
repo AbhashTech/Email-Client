@@ -150,6 +150,7 @@ pub fn parse_fetch_envelope(
         is_deleted,
         body_fetched: false,
         size_bytes,
+        snooze_until: None,
     })
 }
 
