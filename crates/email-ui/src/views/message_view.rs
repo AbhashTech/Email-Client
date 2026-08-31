@@ -43,20 +43,23 @@ impl MessageViewPane {
 
         // 1. Action Toolbar
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-            if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
-                *on_reply = Some(detail.clone());
-            }
-            if ui.button(RichText::new("📝 Text Reply").size(12.0)).on_hover_text("Reply in plain text format only").clicked() {
-                *on_reply_plain = Some(detail.clone());
-            }
-            if ui.button(RichText::new("👥 Reply All").size(12.0)).on_hover_text("Reply to all recipients").clicked() {
-                *on_reply_all = Some(detail.clone());
-            }
-            if ui.button(RichText::new("➡ Forward").size(12.0)).on_hover_text("Forward message").clicked() {
-                *on_forward = Some(detail.clone());
-            }
+        ui.with_layout(
+            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+            |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 5.0);
+                if ui.button(RichText::new("↩ Reply").size(12.0)).on_hover_text("Reply (HTML format by default)").clicked() {
+                    *on_reply = Some(detail.clone());
+                }
+                if ui.button(RichText::new("📝 Text Reply").size(12.0)).on_hover_text("Reply in plain text format only").clicked() {
+                    *on_reply_plain = Some(detail.clone());
+                }
+                if ui.button(RichText::new("👥 Reply All").size(12.0)).on_hover_text("Reply to all recipients").clicked() {
+                    *on_reply_all = Some(detail.clone());
+                }
+                if ui.button(RichText::new("➡ Forward").size(12.0)).on_hover_text("Forward message").clicked() {
+                    *on_forward = Some(detail.clone());
+                }
 
             let read_label = if msg.is_read { "✉ Unread" } else { "✉ Read" };
             if ui.button(RichText::new(read_label).size(12.0)).clicked() {

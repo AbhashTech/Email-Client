@@ -60,8 +60,10 @@ impl MessageListView {
             ui.painter().rect_stroke(bar_rect, Rounding::same(8.0), Stroke::new(1.0_f32, AppTheme::ACCENT_PRIMARY));
 
             let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar_rect));
-            bar_ui.horizontal_centered(|ui| {
-                ui.add_space(8.0);
+            bar_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                ui.spacing_mut().button_padding = Vec2::new(7.0, 4.0);
+                ui.add_space(6.0);
 
                 let all_selected = !messages.is_empty() && messages.iter().all(|m| selected_ids.contains(&m.id));
                 let select_all_icon = if all_selected { "☑" } else { "☐" };
