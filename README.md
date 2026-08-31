@@ -124,18 +124,26 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 🎨 Multi-Theme Engine & Custom Theme Creator
+### 🎨 Multi-Theme Engine & System-Based Auto Switching
 Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance` or the `Ctrl+K` Command Palette:
-1. **Gruvbox Retro Dark**: Warm retro groove dark palette with amber and gold accents (`#282828`).
-2. **Gruvbox Retro Light**: Warm retro groove light parchment palette with ochre accents (`#fbf1c7`).
-3. **Gruvbox Auto (System)**: Automatically switches between Gruvbox Dark & Light based on your operating system's dark mode preference.
-4. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents.
-5. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights.
-6. **Nord Arctic**: Crisp north-bluish dark aesthetic.
-7. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette.
-8. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
-9. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments.
-10. **🎨 Custom Theme Creator**: Full interactive color pickers for App Background, Sidebar, Reading Pane, Cards, Accents, Borders, and Text. Custom themes are saved as standalone JSON files in the OS config folder (`~/.config/at-mail-rs/themes/<theme_name>.json`) and can be exported, imported, and applied on the fly.
+1. **System Auto (Follow OS)**: Automatically tracks your operating system's dark/light mode preference in real-time, displaying **Dark Slate** in dark mode and **Clean Daylight** in light mode.
+2. **Gruvbox Auto (System)**: Automatically switches between **Gruvbox Retro Dark** & **Gruvbox Retro Light** based on your OS preference.
+3. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents (`#121418`).
+4. **Gruvbox Retro Dark**: Warm retro groove dark palette with amber and gold accents (`#282828`).
+5. **Gruvbox Retro Light**: Warm retro groove light parchment palette with ochre accents (`#fbf1c7`).
+6. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights (`#1e1e2e`).
+7. **Nord Arctic**: Crisp north-bluish dark aesthetic (`#2e3440`).
+8. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette (`#002b36`).
+9. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
+10. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments (`#f5f7fa`).
+11. **🎨 Custom Theme Creator**: Full interactive color pickers for App Background, Sidebar, Reading Pane, Cards, Accents, Borders, and Text. Custom themes are saved as standalone JSON files in the OS config folder (`~/.config/at-mail-rs/themes/<theme_name>.json`) and can be exported, imported, and applied on the fly.
+
+#### 🌓 How Automatic System Theme Detection Works:
+The application polls the operating system's native appearance API in real-time to adapt instantly without requiring an application restart:
+- **Linux (Wayland & X11)**: Queries the **XDG Desktop Portal** and GNOME `gsettings get org.gnome.desktop.interface color-scheme` (`'prefer-dark'` vs `'prefer-light'`), with fallback to `$GTK_THEME`.
+- **macOS**: Queries Apple interface style (`defaults read -g AppleInterfaceStyle`).
+- **Windows**: Checks the user personalize registry setting `AppsUseLightTheme`.
+- **GPU Render Loop**: When the OS theme preference switches (e.g. at sunset or via scheduled desktop dark mode), the client's event loop automatically hot-reloads the visual styling and repaints the GPU frame buffer dynamically.
 
 ---
 

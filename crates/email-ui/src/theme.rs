@@ -8,6 +8,7 @@ use std::path::PathBuf;
 pub enum ThemePreset {
     #[default]
     DarkSlate,
+    SystemAuto,
     CatppuccinMocha,
     Nord,
     SolarizedDark,
@@ -22,6 +23,7 @@ impl ThemePreset {
     pub fn all() -> &'static [ThemePreset] {
         &[
             ThemePreset::DarkSlate,
+            ThemePreset::SystemAuto,
             ThemePreset::CatppuccinMocha,
             ThemePreset::Nord,
             ThemePreset::SolarizedDark,
@@ -36,6 +38,7 @@ impl ThemePreset {
     pub fn display_name(&self) -> &'static str {
         match self {
             ThemePreset::DarkSlate => "Dark Slate (Default)",
+            ThemePreset::SystemAuto => "System Auto (Follow OS)",
             ThemePreset::CatppuccinMocha => "Catppuccin Mocha",
             ThemePreset::Nord => "Nord Arctic",
             ThemePreset::SolarizedDark => "Solarized Dark",
@@ -50,6 +53,7 @@ impl ThemePreset {
     pub fn description(&self) -> &'static str {
         match self {
             ThemePreset::DarkSlate => "Modern dark slate with Google Blue accents",
+            ThemePreset::SystemAuto => "Automatically switches between Dark Slate & Clean Daylight based on OS theme",
             ThemePreset::CatppuccinMocha => "Soothing pastel dark aesthetic with lavender accents",
             ThemePreset::Nord => "Arctic bluish dark theme inspired by Nordic colors",
             ThemePreset::SolarizedDark => "Precision low-contrast warm green-dark palette",
@@ -222,15 +226,24 @@ impl AppTheme {
     }
 
     pub fn apply_preset(ctx: &egui::Context, preset: ThemePreset) {
-        let active_preset = if preset == ThemePreset::GruvboxAuto {
-            let sys_theme = detect_system_theme(ctx);
-            if sys_theme == egui::Theme::Light {
-                ThemePreset::GruvboxLight
-            } else {
-                ThemePreset::GruvboxDark
+        let active_preset = match preset {
+            ThemePreset::SystemAuto => {
+                let sys_theme = detect_system_theme(ctx);
+                if sys_theme == egui::Theme::Light {
+                    ThemePreset::LightClean
+                } else {
+                    ThemePreset::DarkSlate
+                }
             }
-        } else {
-            preset
+            ThemePreset::GruvboxAuto => {
+                let sys_theme = detect_system_theme(ctx);
+                if sys_theme == egui::Theme::Light {
+                    ThemePreset::GruvboxLight
+                } else {
+                    ThemePreset::GruvboxDark
+                }
+            }
+            other => other,
         };
 
         let (mut visuals, bg_app, bg_view, bg_card, bg_hover, accent, accent_hover, border, is_light) = match active_preset {
@@ -301,6 +314,7 @@ impl AppTheme {
                 true,
             ),
             ThemePreset::GruvboxAuto => unreachable!(),
+            ThemePreset::SystemAuto => unreachable!(),
             ThemePreset::OledBlack => (
                 Visuals::dark(),
                 Color32::from_rgb(0, 0, 0),       // #000000

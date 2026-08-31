@@ -786,8 +786,10 @@ impl App for EmailApp {
             return;
         }
 
-        if self.current_theme == crate::theme::ThemePreset::GruvboxAuto {
-            AppTheme::apply_preset(ctx, crate::theme::ThemePreset::GruvboxAuto);
+        if self.current_theme == crate::theme::ThemePreset::SystemAuto
+            || self.current_theme == crate::theme::ThemePreset::GruvboxAuto
+        {
+            AppTheme::apply_preset(ctx, self.current_theme);
         }
 
         // Handle Ctrl+, / Cmd+, shortcut to open Settings
