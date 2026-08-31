@@ -5,7 +5,7 @@ use email_core::models::*;
 use log::info;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -72,7 +72,13 @@ pub struct Storage {
 
 impl Storage {
     pub fn new_in_memory() -> Result<Self> {
-        let manager = SqliteConnectionManager::memory();
+        let manager = SqliteConnectionManager::memory().with_init(|c| {
+            let _ = c.pragma_update(None, "journal_mode", "WAL");
+            let _ = c.pragma_update(None, "synchronous", "NORMAL");
+            let _ = c.pragma_update(None, "foreign_keys", "ON");
+            let _ = c.pragma_update(None, "busy_timeout", "5000");
+            Ok(())
+        });
         let pool = Pool::new(manager)
             .map_err(|e| EmailError::Database(format!("Failed to create memory pool: {}", e)))?;
         let storage = Self { pool };
@@ -84,7 +90,13 @@ impl Storage {
         if let Some(parent) = path.as_ref().parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let manager = SqliteConnectionManager::file(path.as_ref());
+        let manager = SqliteConnectionManager::file(path.as_ref()).with_init(|c| {
+            let _ = c.pragma_update(None, "journal_mode", "WAL");
+            let _ = c.pragma_update(None, "synchronous", "NORMAL");
+            let _ = c.pragma_update(None, "foreign_keys", "ON");
+            let _ = c.pragma_update(None, "busy_timeout", "5000");
+            Ok(())
+        });
         let pool = Pool::builder()
             .max_size(16)
             .build(manager)
@@ -1154,12 +1166,60 @@ impl Storage {
     }
 
     pub fn move_message_to_folder(&self, message_id: &str, target_folder_id: &str) -> Result<()> {
-        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
-        conn.execute(
-            "UPDATE messages SET folder_id = ?1 WHERE id = ?2",
-            params![target_folder_id, message_id],
-        )
-        .map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| EmailError::Database(e.to_string()))?;
+        {
+            // 1. Get old folder_id and is_read status
+            let info: Option<(String, bool)> = tx
+                .query_row(
+                    "SELECT folder_id, is_read FROM messages WHERE id = ?1",
+                    params![message_id],
+                    |row| Ok((row.get(0)?, row.get::<_, i32>(1)? != 0)),
+                )
+                .optional()
+                .map_err(|e| EmailError::Database(e.to_string()))?;
+
+            if let Some((old_folder_id, is_read)) = info {
+                if old_folder_id != target_folder_id {
+                    // 2. Safely update message folder_id and allocate a collision-free temporary UID
+                    tx.execute(
+                        r#"
+                        UPDATE messages 
+                        SET folder_id = ?1,
+                            uid = (SELECT coalesce(max(uid), 0) + 1 FROM messages WHERE folder_id = ?1)
+                        WHERE id = ?2
+                        "#,
+                        params![target_folder_id, message_id],
+                    )
+                    .map_err(|e| EmailError::Database(e.to_string()))?;
+
+                    // 3. Update message counts on old folder
+                    tx.execute(
+                        r#"
+                        UPDATE folders 
+                        SET total_messages = max(0, total_messages - 1),
+                            unread_messages = max(0, unread_messages - (CASE WHEN ?1 = 0 THEN 1 ELSE 0 END))
+                        WHERE id = ?2
+                        "#,
+                        params![if is_read { 1 } else { 0 }, old_folder_id],
+                    )
+                    .map_err(|e| EmailError::Database(e.to_string()))?;
+
+                    // 4. Update message counts on new folder
+                    tx.execute(
+                        r#"
+                        UPDATE folders 
+                        SET total_messages = total_messages + 1,
+                            unread_messages = unread_messages + (CASE WHEN ?1 = 0 THEN 1 ELSE 0 END)
+                        WHERE id = ?2
+                        "#,
+                        params![if is_read { 1 } else { 0 }, target_folder_id],
+                    )
+                    .map_err(|e| EmailError::Database(e.to_string()))?;
+                }
+            }
+        }
+        tx.commit().map_err(|e| EmailError::Database(e.to_string()))?;
         Ok(())
     }
 

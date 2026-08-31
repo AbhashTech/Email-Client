@@ -431,6 +431,11 @@ impl SyncWorker {
                                             }
                                         }
                                         let _ = session.logout().await;
+                                        let _ = event_tx.send(SyncEvent::FolderSynced {
+                                            account_id: account_id.clone(),
+                                            folder_id: target_folder_id.clone(),
+                                            new_messages_count: 0,
+                                        });
                                     }
                                 }
                             }

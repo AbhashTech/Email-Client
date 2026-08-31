@@ -1403,19 +1403,42 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, target_folder_id)) = on_move_folder {
-            if let Some(m) = self.messages.iter().find(|m| m.id == msg_id).cloned() {
+            let msg_info = self
+                .messages
+                .iter()
+                .find(|m| m.id == msg_id)
+                .map(|m| (m.account_id.clone(), m.folder_id.clone(), m.uid))
+                .or_else(|| {
+                    self.storage
+                        .get_message_detail(&msg_id)
+                        .ok()
+                        .flatten()
+                        .map(|d| (d.header.account_id, d.header.folder_id, d.header.uid))
+                });
+
+            if let Some((account_id, source_folder_id, uid)) = msg_info {
                 let _ = self.storage.move_message_to_folder(&msg_id, &target_folder_id);
                 let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
-                    account_id: m.account_id,
-                    source_folder_id: m.folder_id,
-                    target_folder_id,
-                    uid: m.uid,
+                    account_id,
+                    source_folder_id,
+                    target_folder_id: target_folder_id.clone(),
+                    uid,
                     message_id: msg_id.clone(),
                 });
             }
             self.selected_message_id = None;
             self.selected_message_detail = None;
             self.reload_data();
+            let target_folder_name = self
+                .folders_by_account
+                .values()
+                .flatten()
+                .find(|f| f.id == target_folder_id)
+                .map(|f| f.display_name.as_str())
+                .unwrap_or("folder");
+            let toast = format!("Moved email to {}", target_folder_name);
+            self.status_text = toast.clone();
+            self.status_toast = Some((toast, std::time::Instant::now()));
         }
 
         if let Some((msg_id, snooze_until)) = on_snooze {
