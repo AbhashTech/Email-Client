@@ -364,6 +364,28 @@ pub struct MessageDetail {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationThread {
+    pub thread_id: String,
+    pub subject: String,
+    pub messages: Vec<MessageDetail>,
+}
+
+pub fn clean_subject_thread_root(subject: &str) -> String {
+    let mut s = subject.trim();
+    loop {
+        let lower = s.to_lowercase();
+        if lower.starts_with("re:") || lower.starts_with("fw:") {
+            s = s[3..].trim();
+        } else if lower.starts_with("fwd:") {
+            s = s[4..].trim();
+        } else {
+            break;
+        }
+    }
+    s.to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Template {
     pub id: String,
     pub name: String,

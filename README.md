@@ -65,6 +65,14 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
+### 💬 Conversation Threading View
+- **Smart Conversation Hierarchy**: Resolves and groups related email exchanges using `In-Reply-To`, `Message-ID`, and cleaned subject roots into unified chronological threads.
+- **Conversational Bubble Timeline**: Displays multi-message discussions as interactive bubble cards with sender avatar badges, timestamps, recipients, and connector lines.
+- **Expand / Collapse Accordion**: Intelligently expands the latest reply while keeping older history collapsible for clean and distraction-free reading.
+- **Per-Bubble Actions**: Quick access to reply, forward, view HTML body, and download attachments on any message within the conversation thread.
+
+---
+
 ### 📝 Composer, Drafts, Scheduled Send & Undo Send
 - **💾 Save as Draft (`💾 Save Draft`)**: Persist in-progress emails (recipients, format, subject, body, signature) to local SQLite storage. Re-open and edit drafts directly from the reading pane (`[✏ Edit Draft]`).
 - **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.

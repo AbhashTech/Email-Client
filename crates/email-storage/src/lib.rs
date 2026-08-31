@@ -969,7 +969,78 @@ impl Storage {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(EmailError::Database(e.to_string())),
         }
+    }
 
+    pub fn get_conversation_thread(&self, message_id: &str) -> Result<Option<email_core::models::ConversationThread>> {
+        let initial_detail = match self.get_message_detail(message_id)? {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        let root_subject = email_core::models::clean_subject_thread_root(&initial_detail.header.subject);
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id FROM messages
+            WHERE account_id = ?1
+              AND is_deleted = 0
+              AND (
+                (?2 IS NOT NULL AND (message_id = ?2 OR in_reply_to = ?2))
+                OR (?3 IS NOT NULL AND in_reply_to = ?3)
+                OR (subject != '' AND (
+                    subject = ?4
+                    OR subject = 'Re: ' || ?4
+                    OR subject = 'RE: ' || ?4
+                    OR subject = 're: ' || ?4
+                    OR subject = 'Fwd: ' || ?4
+                    OR subject = 'FWD: ' || ?4
+                    OR subject = 'fwd: ' || ?4
+                    OR subject = 'Fw: ' || ?4
+                ))
+              )
+            ORDER BY date_epoch ASC
+            "#,
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt.query_map(
+            params![
+                initial_detail.header.account_id,
+                initial_detail.header.message_id,
+                initial_detail.header.in_reply_to,
+                root_subject,
+            ],
+            |row| row.get::<_, String>(0),
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut found_ids: Vec<String> = Vec::new();
+        for r in rows {
+            if let Ok(id) = r {
+                found_ids.push(id);
+            }
+        }
+
+        if !found_ids.contains(&initial_detail.header.id) {
+            found_ids.push(initial_detail.header.id.clone());
+        }
+
+        let mut thread_messages = Vec::new();
+        for mid in found_ids {
+            if let Some(detail) = self.get_message_detail(&mid)? {
+                thread_messages.push(detail);
+            }
+        }
+
+        thread_messages.sort_by_key(|m| m.header.date_epoch);
+        thread_messages.dedup_by(|a, b| a.header.id == b.header.id);
+
+        let thread_id = initial_detail.header.message_id.unwrap_or_else(|| initial_detail.header.id.clone());
+
+        Ok(Some(email_core::models::ConversationThread {
+            thread_id,
+            subject: root_subject,
+            messages: thread_messages,
+        }))
     }
 
     pub fn save_message_body(
@@ -1901,6 +1972,91 @@ mod tests {
         let restored = storage.get_messages(Some(&account.id), None, 10, 0, None).unwrap();
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0].id, "msg_snooze_1");
+    }
+
+    #[test]
+    fn test_conversation_thread_resolution() {
+        let storage = Storage::new_in_memory().unwrap();
+        let account = Account::new(
+            "Thread Test".to_string(),
+            "thread@example.com".to_string(),
+            "imap.example.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.example.com".to_string(),
+            587,
+            SecurityType::StartTls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let folder = Folder::new(
+            account.id.clone(),
+            "INBOX".to_string(),
+            "Inbox".to_string(),
+            "/".to_string(),
+            vec!["\\Inbox".to_string()],
+            true,
+        );
+        storage.save_folders(&[folder.clone()]).unwrap();
+
+        let m1 = MessageHeader {
+            id: "thread_msg_1".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder.id.clone(),
+            uid: 301,
+            message_id: Some("<root_thread_001@example.com>".to_string()),
+            in_reply_to: None,
+            subject: "API Design Proposal for 2.0".to_string(),
+            from_name: Some("Lead Architect".to_string()),
+            from_address: "arch@example.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Team".to_string()), "team@example.com".to_string())],
+            cc_recipients: Vec::new(),
+            date_epoch: 1700000000,
+            snippet: "Here is the RFC draft for 2.0...".to_string(),
+            is_read: true,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 1024,
+            snooze_until: None,
+        };
+
+        let m2 = MessageHeader {
+            id: "thread_msg_2".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder.id.clone(),
+            uid: 302,
+            message_id: Some("<reply_thread_002@example.com>".to_string()),
+            in_reply_to: Some("<root_thread_001@example.com>".to_string()),
+            subject: "Re: API Design Proposal for 2.0".to_string(),
+            from_name: Some("Kunal".to_string()),
+            from_address: "kunal@example.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Lead Architect".to_string()), "arch@example.com".to_string())],
+            cc_recipients: Vec::new(),
+            date_epoch: 1700000200,
+            snippet: "Looks solid, let's verify error status codes.".to_string(),
+            is_read: true,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 512,
+            snooze_until: None,
+        };
+
+        storage.save_message_headers(&[m1.clone(), m2.clone()]).unwrap();
+        storage.save_message_body(&m1.id, Some("RFC content details for proposed endpoints."), None).unwrap();
+        storage.save_message_body(&m2.id, Some("I agree with endpoint design."), None).unwrap();
+
+        // Resolving from child reply
+        let thread = storage.get_conversation_thread(&m2.id).unwrap().expect("Thread resolved");
+        assert_eq!(thread.subject, "API Design Proposal for 2.0");
+        assert_eq!(thread.messages.len(), 2);
+        assert_eq!(thread.messages[0].header.id, "thread_msg_1");
+        assert_eq!(thread.messages[1].header.id, "thread_msg_2");
     }
 }
 

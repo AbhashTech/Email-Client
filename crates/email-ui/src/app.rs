@@ -1109,10 +1109,20 @@ impl App for EmailApp {
             Vec::new()
         };
 
+        let thread_messages = if let Some(ref detail) = self.selected_message_detail {
+            self.storage.get_conversation_thread(&detail.header.id)
+                .ok()
+                .flatten()
+                .map(|t| t.messages)
+                .unwrap_or_else(|| vec![detail.clone()])
+        } else {
+            Vec::new()
+        };
+
         egui::CentralPanel::default().show(ctx, |ui| {
             MessageViewPane::show(
                 ui,
-                self.selected_message_detail.as_ref(),
+                &thread_messages,
                 &active_folders,
                 &mut self.allowed_remote_images,
                 &self.cmd_tx,
