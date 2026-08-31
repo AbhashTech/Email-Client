@@ -76,6 +76,58 @@ impl MessageViewPane {
                     }
                 });
 
+            // Export Dropdown
+            egui::ComboBox::from_id_salt(format!("export_combo_{}", msg.id))
+                .selected_text(RichText::new("📤 Export").size(12.0))
+                .show_ui(ui, |ui| {
+                    let safe_fn = sanitize_filename_for_export(&msg.subject);
+
+                    if ui.button(RichText::new("📄 Markdown (.md)").size(12.0)).clicked() {
+                        let content = export_message_as_markdown(detail);
+                        let fname = format!("{}.md", safe_fn);
+                        std::thread::spawn(move || {
+                            let dialog = rfd::FileDialog::new()
+                                .set_file_name(&fname)
+                                .add_filter("Markdown Document", &["md"])
+                                .set_title("Export Email as Markdown");
+                            if let Some(path) = dialog.save_file() {
+                                let _ = std::fs::write(path, content);
+                            }
+                        });
+                        *status_toast = Some("Exporting email as Markdown...".to_string());
+                    }
+
+                    if ui.button(RichText::new("🌐 HTML Document (.html)").size(12.0)).clicked() {
+                        let content = export_message_as_html(detail);
+                        let fname = format!("{}.html", safe_fn);
+                        std::thread::spawn(move || {
+                            let dialog = rfd::FileDialog::new()
+                                .set_file_name(&fname)
+                                .add_filter("HTML Document", &["html"])
+                                .set_title("Export Email as HTML");
+                            if let Some(path) = dialog.save_file() {
+                                let _ = std::fs::write(path, content);
+                            }
+                        });
+                        *status_toast = Some("Exporting email as HTML...".to_string());
+                    }
+
+                    if ui.button(RichText::new("✉ Raw EML (.eml)").size(12.0)).clicked() {
+                        let content = export_message_as_eml(detail);
+                        let fname = format!("{}.eml", safe_fn);
+                        std::thread::spawn(move || {
+                            let dialog = rfd::FileDialog::new()
+                                .set_file_name(&fname)
+                                .add_filter("Email File", &["eml"])
+                                .set_title("Export Email as EML");
+                            if let Some(path) = dialog.save_file() {
+                                let _ = std::fs::write(path, content);
+                            }
+                        });
+                        *status_toast = Some("Exporting email as EML...".to_string());
+                    }
+                });
+
             if ui.button(RichText::new("🌐 In-App Web View").size(12.0))
                 .on_hover_text("Open in dedicated native WebKit webview reader window (100% pixel-perfect HTML)")
                 .clicked()
@@ -693,4 +745,153 @@ fn render_spans(ui: &mut Ui, spans: &[FormattedSpan], wrap_width: f32, is_light_
             }
         });
     });
+}
+
+pub fn export_message_as_markdown(detail: &MessageDetail) -> String {
+    let msg = &detail.header;
+    let format_recipient = |r: &email_core::Recipient| {
+        if let Some(ref n) = r.name {
+            format!("{} <{}>", n, r.email)
+        } else {
+            r.email.clone()
+        }
+    };
+    let to_str = msg.to_recipients.iter().map(format_recipient).collect::<Vec<_>>().join(", ");
+    let cc_str = msg.cc_recipients.iter().map(format_recipient).collect::<Vec<_>>().join(", ");
+    let body_text = detail.body_plain.clone().unwrap_or_else(|| {
+        detail.body_html.as_deref().map(email_html::html_to_plain_text).unwrap_or_default()
+    });
+
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("Subject: {}\n", msg.subject));
+    out.push_str(&format!("From: {}\n", msg.from_address));
+    if !to_str.is_empty() {
+        out.push_str(&format!("To: {}\n", to_str));
+    }
+    if !cc_str.is_empty() {
+        out.push_str(&format!("Cc: {}\n", cc_str));
+    }
+    out.push_str(&format!("Date: {}\n", msg.formatted_date()));
+    out.push_str("---\n\n");
+    out.push_str(&body_text);
+    out
+}
+
+pub fn export_message_as_html(detail: &MessageDetail) -> String {
+    crate::webview::prepare_email_html(detail)
+}
+
+pub fn export_message_as_eml(detail: &MessageDetail) -> String {
+    let msg = &detail.header;
+    let format_recipient = |r: &email_core::Recipient| {
+        if let Some(ref n) = r.name {
+            format!("{} <{}>", n, r.email)
+        } else {
+            r.email.clone()
+        }
+    };
+    let to_str = msg.to_recipients.iter().map(format_recipient).collect::<Vec<_>>().join(", ");
+    let cc_str = msg.cc_recipients.iter().map(format_recipient).collect::<Vec<_>>().join(", ");
+
+    let mut eml = String::new();
+    eml.push_str(&format!("From: {}\r\n", msg.from_address));
+    if !to_str.is_empty() {
+        eml.push_str(&format!("To: {}\r\n", to_str));
+    }
+    if !cc_str.is_empty() {
+        eml.push_str(&format!("Cc: {}\r\n", cc_str));
+    }
+    eml.push_str(&format!("Subject: {}\r\n", msg.subject));
+    if let Some(ref mid) = msg.message_id {
+        eml.push_str(&format!("Message-ID: <{}>\r\n", mid));
+    }
+    eml.push_str("MIME-Version: 1.0\r\n");
+
+    if let Some(ref html) = detail.body_html {
+        eml.push_str("Content-Type: text/html; charset=UTF-8\r\n\r\n");
+        eml.push_str(html);
+    } else if let Some(ref plain) = detail.body_plain {
+        eml.push_str("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
+        eml.push_str(plain);
+    } else {
+        eml.push_str("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
+    }
+
+    eml
+}
+
+pub fn sanitize_filename_for_export(subject: &str) -> String {
+    let clean: String = subject
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let trimmed = clean.trim_matches('_');
+    if trimmed.is_empty() {
+        "email_export".to_string()
+    } else if trimmed.len() > 50 {
+        trimmed[..50].to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use email_core::models::{MessageHeader, Recipient};
+
+    fn sample_detail() -> MessageDetail {
+        MessageDetail {
+            header: MessageHeader {
+                id: "msg-99".to_string(),
+                account_id: "acc-1".to_string(),
+                folder_id: "inbox".to_string(),
+                uid: 42,
+                message_id: Some("unique-id-99@domain.com".to_string()),
+                in_reply_to: None,
+                subject: "Quarterly Financial Report Q3".to_string(),
+                from_name: Some("Finance Lead".to_string()),
+                from_address: "finance@company.com".to_string(),
+                to_recipients: vec![Recipient::new(Some("Kunal".to_string()), "kunal@abhashtech.com".to_string())],
+                cc_recipients: vec![Recipient::new(None, "audit@company.com".to_string())],
+                date_epoch: 1700000000,
+                snippet: "Attached is the quarterly report".to_string(),
+                is_read: true,
+                is_flagged: true,
+                is_draft: false,
+                is_deleted: false,
+                body_fetched: true,
+                size_bytes: 4096,
+            },
+            body_plain: Some("Hello team,\n\nHere is the financial summary for Q3.\nRevenue grew by 24%.\n\nBest,\nFinance".to_string()),
+            body_html: Some("<p>Hello team,</p><p>Here is the financial summary for Q3.</p><p>Revenue grew by 24%.</p><p>Best,<br>Finance</p>".to_string()),
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_export_as_markdown() {
+        let detail = sample_detail();
+        let md = export_message_as_markdown(&detail);
+        assert!(md.contains("Subject: Quarterly Financial Report Q3"));
+        assert!(md.contains("From: finance@company.com"));
+        assert!(md.contains("Revenue grew by 24%"));
+    }
+
+    #[test]
+    fn test_export_as_eml() {
+        let detail = sample_detail();
+        let eml = export_message_as_eml(&detail);
+        assert!(eml.contains("From: finance@company.com"));
+        assert!(eml.contains("Subject: Quarterly Financial Report Q3"));
+        assert!(eml.contains("Message-ID: <unique-id-99@domain.com>"));
+        assert!(eml.contains("MIME-Version: 1.0"));
+    }
+
+    #[test]
+    fn test_sanitize_filename_for_export() {
+        assert_eq!(sanitize_filename_for_export("Hello / World: Test?"), "Hello___World__Test");
+        assert_eq!(sanitize_filename_for_export(""), "email_export");
+    }
 }
