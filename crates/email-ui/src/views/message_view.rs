@@ -75,8 +75,41 @@ impl MessageViewPane {
                     }
                 });
 
-            if ui.button(RichText::new("🌐 Full Web View").size(12.0))
-                .on_hover_text("Open 100% pixel-perfect HTML in browser/webview")
+            if ui.button(RichText::new("🌐 In-App Web View").size(12.0))
+                .on_hover_text("Open in dedicated native WebKit webview reader window (100% pixel-perfect HTML)")
+                .clicked()
+            {
+                let raw_body = detail.body_html.as_deref().unwrap_or(detail.body_plain.as_deref().unwrap_or(""));
+                let mut full_html = raw_body.to_string();
+
+                for att in &detail.attachments {
+                    if let Some(ref cid) = att.content_id {
+                        let clean_cid = cid.trim_matches(|c| c == '<' || c == '>');
+                        if let Some(ref cache_path) = att.local_cache_path {
+                            let file_uri = format!("file://{}", cache_path);
+                            full_html = full_html.replace(&format!("cid:{}", clean_cid), &file_uri);
+                            full_html = full_html.replace(&format!("cid:<{}>", clean_cid), &file_uri);
+                        }
+                    }
+                }
+
+                let doc = if detail.body_html.is_some() {
+                    full_html
+                } else {
+                    format!("<pre style=\"white-space: pre-wrap; font-family: monospace; padding: 16px;\">{}</pre>", html_escape::encode_text(&full_html))
+                };
+
+                let subject_title = if msg.subject.trim().is_empty() {
+                    "Email Preview".to_string()
+                } else {
+                    msg.subject.clone()
+                };
+
+                crate::webview::open_webview_window(subject_title, doc);
+            }
+
+            if ui.button(RichText::new("↗ Browser").size(12.0))
+                .on_hover_text("Open in default system browser")
                 .clicked()
             {
                 let temp_dir = std::env::temp_dir();

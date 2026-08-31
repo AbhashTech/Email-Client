@@ -2,6 +2,7 @@ mod app;
 mod theme;
 mod tray;
 mod views;
+pub mod webview;
 
 use app::EmailApp;
 use eframe::NativeOptions;
