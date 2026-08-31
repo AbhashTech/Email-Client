@@ -33,7 +33,7 @@ thiserror = "1.0"
 log = "0.4"
 env_logger = "0.11"
 async-trait = "0.1"
-rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+rusqlite = { version = "0.32", features = ["bundled-full", "chrono", "uuid"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 keyring = { version = "3.0", features = ["sync-secret-service"] }

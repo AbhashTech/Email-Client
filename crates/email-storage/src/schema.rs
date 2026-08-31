@@ -1,8 +1,4 @@
 pub const SCHEMA_V1: &str = r#"
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;
-
 -- Accounts
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
@@ -128,4 +124,46 @@ CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(subject, from_address
 CREATE INDEX IF NOT EXISTS idx_folders_account ON folders(account_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_account ON drafts(account_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_emails(send_at_timestamp ASC);
+
+-- FTS5 Full-Text Search Virtual Table
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    message_id UNINDEXED,
+    account_id UNINDEXED,
+    folder_id UNINDEXED,
+    subject,
+    from_name,
+    from_address,
+    snippet,
+    body_text,
+    to_recipients,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+-- Synchronization Triggers for FTS5
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(
+        rowid, message_id, account_id, folder_id, subject,
+        from_name, from_address, snippet, body_text, to_recipients
+    ) VALUES (
+        new.rowid, new.id, new.account_id, new.folder_id, new.subject,
+        coalesce(new.from_name, ''), new.from_address, new.snippet,
+        coalesce(new.body_plain, ''), new.to_recipients_json
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE message_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
+    DELETE FROM messages_fts WHERE message_id = old.id;
+    INSERT INTO messages_fts(
+        rowid, message_id, account_id, folder_id, subject,
+        from_name, from_address, snippet, body_text, to_recipients
+    ) VALUES (
+        new.rowid, new.id, new.account_id, new.folder_id, new.subject,
+        coalesce(new.from_name, ''), new.from_address, new.snippet,
+        coalesce(new.body_plain, ''), new.to_recipients_json
+    );
+END;
 "#;

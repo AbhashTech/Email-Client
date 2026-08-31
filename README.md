@@ -39,7 +39,8 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 🔍 Command Palette & Smart Search
+### 🔍 SQLite FTS5 Full-Text Offline Search & Smart Tokens
+- **🚀 Instant Full-Text FTS5 Engine**: Embedded SQLite `FTS5` virtual table with **BM25 relevance ranking** indexing subjects, recipient addresses, snippet previews, and full email body contents offline for instant sub-millisecond search across hundreds of thousands of emails.
 - **⚡ Command Palette (`Ctrl+K` / `Cmd+K`)**: Modal command launcher with fuzzy filtering, categorical grouping (Navigation, Folders, Actions, Message, Themes), and keyboard arrow navigation.
 - **🏷️ Quick Filter Chips**: Tactile chip buttons (`[All]`, `[✉ Unread]`, `[★ Starred]`, `[📎 Files]`) above the message list with active visual indicators.
 - **🔎 Structured Search Tokens**: Search query parser supporting structured search tokens alongside free-text queries:
@@ -52,12 +53,23 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 📝 Composer & Undo Send
+### 📝 Composer, Drafts, Scheduled Send & Undo Send
+- **💾 Save as Draft (`💾 Save Draft`)**: Persist in-progress emails (recipients, format, subject, body, signature) to local SQLite storage. Re-open and edit drafts directly from the reading pane (`[✏ Edit Draft]`).
+- **⏰ Send Later / Scheduled Outbox (`⏰ Send Later ▾`)**: Schedule delivery with convenient presets (`In 15m`, `In 1h`, `In 3h`, `Tomorrow 9 AM`, `Tomorrow 6 PM`) or custom date/time. The background dispatcher automatically transmits emails when due via SMTP.
 - **⚡ Markdown Compose Mode with Live Preview**: Side-by-side split screen for drafting emails in Markdown with real-time rendered HTML preview. Includes formatting action buttons for Bold, Italic, Headings, Lists, Blockquotes, and Code Blocks.
 - **🌐 HTML & Plain Text Modes**: Full support for HTML rich text and Text-Only drafting modes.
 - **↩ 5-Second Undo Send**: Outgoing emails enter a 5-second safety buffer with a floating countdown bar (`[ ↩ Undo Send ]` / `[ ⚡ Send Now ]`). Clicking Undo immediately aborts transmission and restores the full draft into the composer.
-- **🖋️ Default & Custom Signatures**: Automatically attaches account-specific or global signatures with HTML sanitization.
-- **📋 Boilerplate Templates**: Reusable response snippets with dynamic variable substitutions (`{{name}}`, `{{sender}}`, `{{date}}`).
+- **🖋️ Default & Custom Signatures (Create & Edit)**: Edit and manage account-specific or global signatures with HTML sanitization.
+- **📋 Quick Templates & Snippets (Create & Edit)**: Edit and manage reusable response templates with quick shortcut triggers (e.g. `/meeting`, `/followup`).
+
+---
+
+### 🪟 Window Controls & System Tray Integration
+- **Window Titlebar Controls**: Minimize (`[-]`), Maximize/Restore (`[🗖]`), and Close (`[✕]`) buttons built directly into the top navigation bar.
+- **System Tray (StatusNotifierItem DBus)**:
+  - Click tray icon to toggle application visibility.
+  - Context menu actions: `Show/Hide Window`, `✉ Compose Email`, `🔄 Sync All Mail`, and `Quit`.
+- **Customizable Close Action (`Settings -> General & Storage`)**: Configure whether clicking window close (`✕`) minimizes to the system tray to continue background sync or completely quits the application.
 
 ---
 

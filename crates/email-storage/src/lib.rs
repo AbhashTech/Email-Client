@@ -53,6 +53,18 @@ pub fn parse_search_query(raw: &str) -> ParsedSearchQuery {
     parsed
 }
 
+pub fn sanitize_fts5_token(token: &str) -> String {
+    let cleaned: String = token
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '@' || *c == '.')
+        .collect();
+    if cleaned.is_empty() {
+        String::new()
+    } else {
+        format!("\"{}\"*", cleaned)
+    }
+}
+
 #[derive(Clone)]
 pub struct Storage {
     pool: Pool<SqliteConnectionManager>,
@@ -87,6 +99,9 @@ impl Storage {
             .pool
             .get()
             .map_err(|e| EmailError::Database(e.to_string()))?;
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        let _ = conn.pragma_update(None, "foreign_keys", "ON");
         conn.execute_batch(schema::SCHEMA_V1)
             .map_err(|e| EmailError::Database(format!("Schema init error: {}", e)))?;
         info!("SQLite database initialized successfully with WAL mode.");
@@ -526,6 +541,12 @@ impl Storage {
         offset: usize,
         search_query: Option<&str>,
     ) -> Result<Vec<MessageHeader>> {
+        if let Some(search) = search_query {
+            if !search.trim().is_empty() {
+                return self.search_messages_fts(account_id, folder_id, search, limit, offset);
+            }
+        }
+
         let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
 
         let mut query = String::from(
@@ -546,58 +567,153 @@ impl Storage {
             params_vec.push(Box::new(aid.to_string()));
         }
 
-        if let Some(search) = search_query {
-            if !search.trim().is_empty() {
-                let parsed = parse_search_query(search);
+        query.push_str(" ORDER BY date_epoch DESC LIMIT ? OFFSET ?");
+        params_vec.push(Box::new(limit as i64));
+        params_vec.push(Box::new(offset as i64));
 
-                for f in &parsed.from {
-                    query.push_str(" AND (lower(from_address) LIKE ? OR lower(from_name) LIKE ?)");
-                    let pattern = format!("%{}%", f);
-                    params_vec.push(Box::new(pattern.clone()));
-                    params_vec.push(Box::new(pattern));
-                }
+        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
 
-                for t in &parsed.to {
-                    query.push_str(" AND lower(to_recipients_json) LIKE ?");
-                    params_vec.push(Box::new(format!("%{}%", t)));
-                }
+        let mut stmt = conn.prepare(&query).map_err(|e| EmailError::Database(e.to_string()))?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params_slice), |row| {
+                let to_json: String = row.get(9)?;
+                let cc_json: String = row.get(10)?;
+                let to_recipients: Vec<Recipient> = serde_json::from_str(&to_json).unwrap_or_default();
+                let cc_recipients: Vec<Recipient> = serde_json::from_str(&cc_json).unwrap_or_default();
+                let is_read: i32 = row.get(13)?;
+                let is_flagged: i32 = row.get(14)?;
+                let is_draft: i32 = row.get(15)?;
+                let is_deleted: i32 = row.get(16)?;
+                let body_fetched: i32 = row.get(17)?;
+                let size_bytes: i64 = row.get(18)?;
 
-                for s in &parsed.subject {
-                    query.push_str(" AND lower(subject) LIKE ?");
-                    params_vec.push(Box::new(format!("%{}%", s)));
-                }
+                Ok(MessageHeader {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    folder_id: row.get(2)?,
+                    uid: row.get(3)?,
+                    message_id: row.get(4)?,
+                    in_reply_to: row.get(5)?,
+                    subject: row.get(6)?,
+                    from_name: row.get(7)?,
+                    from_address: row.get(8)?,
+                    to_recipients,
+                    cc_recipients,
+                    date_epoch: row.get(11)?,
+                    snippet: row.get(12)?,
+                    is_read: is_read == 1,
+                    is_flagged: is_flagged == 1,
+                    is_draft: is_draft == 1,
+                    is_deleted: is_deleted == 1,
+                    body_fetched: body_fetched == 1,
+                    size_bytes: size_bytes as u64,
+                })
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
 
-                if let Some(unread) = parsed.is_unread {
-                    if unread {
-                        query.push_str(" AND is_read = 0");
-                    } else {
-                        query.push_str(" AND is_read = 1");
-                    }
-                }
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row.map_err(|e| EmailError::Database(e.to_string()))?);
+        }
+        Ok(messages)
+    }
 
-                if let Some(flagged) = parsed.is_flagged {
-                    if flagged {
-                        query.push_str(" AND is_flagged = 1");
-                    }
-                }
+    pub fn search_messages_fts(
+        &self,
+        account_id: Option<&str>,
+        folder_id: Option<&str>,
+        search_query: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<MessageHeader>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let parsed = parse_search_query(search_query);
 
-                if parsed.has_attachment {
-                    query.push_str(" AND id IN (SELECT DISTINCT message_id FROM attachments WHERE is_inline = 0 OR size_bytes > 0)");
-                }
+        let mut fts_clauses: Vec<String> = Vec::new();
 
-                if !parsed.free_text.is_empty() {
-                    let combined = parsed.free_text.join(" ");
-                    query.push_str(" AND (lower(subject) LIKE ? OR lower(from_address) LIKE ? OR lower(from_name) LIKE ? OR lower(snippet) LIKE ?)");
-                    let pattern = format!("%{}%", combined.to_lowercase());
-                    params_vec.push(Box::new(pattern.clone()));
-                    params_vec.push(Box::new(pattern.clone()));
-                    params_vec.push(Box::new(pattern.clone()));
-                    params_vec.push(Box::new(pattern));
-                }
+        for f in &parsed.from {
+            let tok = sanitize_fts5_token(f);
+            if !tok.is_empty() {
+                fts_clauses.push(format!("(from_address: {tok} OR from_name: {tok})"));
             }
         }
 
-        query.push_str(" ORDER BY date_epoch DESC LIMIT ? OFFSET ?");
+        for t in &parsed.to {
+            let tok = sanitize_fts5_token(t);
+            if !tok.is_empty() {
+                fts_clauses.push(format!("to_recipients: {tok}"));
+            }
+        }
+
+        for s in &parsed.subject {
+            let tok = sanitize_fts5_token(s);
+            if !tok.is_empty() {
+                fts_clauses.push(format!("subject: {tok}"));
+            }
+        }
+
+        for text in &parsed.free_text {
+            let tok = sanitize_fts5_token(text);
+            if !tok.is_empty() {
+                fts_clauses.push(format!(
+                    "(subject: {tok} OR snippet: {tok} OR body_text: {tok} OR from_address: {tok} OR from_name: {tok})"
+                ));
+            }
+        }
+
+        let mut query = String::from(
+            r#"
+            SELECT m.id, m.account_id, m.folder_id, m.uid, m.message_id, m.in_reply_to,
+                   m.subject, m.from_name, m.from_address, m.to_recipients_json, m.cc_recipients_json,
+                   m.date_epoch, m.snippet, m.is_read, m.is_flagged, m.is_draft, m.is_deleted,
+                   m.body_fetched, m.size_bytes
+            FROM messages m
+            "#,
+        );
+
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if !fts_clauses.is_empty() {
+            let match_expr = fts_clauses.join(" AND ");
+            query.push_str(" JOIN messages_fts f ON f.message_id = m.id WHERE messages_fts MATCH ?");
+            params_vec.push(Box::new(match_expr));
+            query.push_str(" AND m.is_deleted = 0");
+        } else {
+            query.push_str(" WHERE m.is_deleted = 0");
+        }
+
+        if let Some(fid) = folder_id {
+            query.push_str(" AND m.folder_id = ?");
+            params_vec.push(Box::new(fid.to_string()));
+        } else if let Some(aid) = account_id {
+            query.push_str(" AND m.account_id = ?");
+            params_vec.push(Box::new(aid.to_string()));
+        }
+
+        if let Some(unread) = parsed.is_unread {
+            if unread {
+                query.push_str(" AND m.is_read = 0");
+            } else {
+                query.push_str(" AND m.is_read = 1");
+            }
+        }
+
+        if let Some(flagged) = parsed.is_flagged {
+            if flagged {
+                query.push_str(" AND m.is_flagged = 1");
+            }
+        }
+
+        if parsed.has_attachment {
+            query.push_str(" AND m.id IN (SELECT DISTINCT message_id FROM attachments WHERE is_inline = 0 OR size_bytes > 0)");
+        }
+
+        if !fts_clauses.is_empty() {
+            query.push_str(" ORDER BY bm25(messages_fts) ASC, m.date_epoch DESC LIMIT ? OFFSET ?");
+        } else {
+            query.push_str(" ORDER BY m.date_epoch DESC LIMIT ? OFFSET ?");
+        }
+
         params_vec.push(Box::new(limit as i64));
         params_vec.push(Box::new(offset as i64));
 
@@ -1466,6 +1582,102 @@ mod tests {
         let remaining = storage.list_all_scheduled(None).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, scheduled_future.id);
+    }
+
+    #[test]
+    fn test_fts5_full_text_search_and_ranking() {
+        let storage = Storage::new_in_memory().unwrap();
+        let account = Account::new(
+            "FTS Search Test".to_string(),
+            "fts@example.com".to_string(),
+            "imap.example.com".to_string(),
+            993,
+            SecurityType::Tls,
+            "smtp.example.com".to_string(),
+            587,
+            SecurityType::StartTls,
+            AuthType::Password,
+            SyncWindow::Days30,
+        );
+        storage.save_account(&account).unwrap();
+
+        let folder = Folder::new(
+            account.id.clone(),
+            "INBOX".to_string(),
+            "Inbox".to_string(),
+            "/".to_string(),
+            vec!["\\Inbox".to_string()],
+            true,
+        );
+        storage.save_folders(&[folder.clone()]).unwrap();
+
+        let msg1 = MessageHeader {
+            id: "msg_fts_1".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder.id.clone(),
+            uid: 101,
+            message_id: Some("msg1@fts.com".to_string()),
+            in_reply_to: None,
+            subject: "Quarterly Financial Analysis Report".to_string(),
+            from_name: Some("Finance Lead".to_string()),
+            from_address: "finance@company.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Kunal".to_string()), "kunal@company.com".to_string())],
+            cc_recipients: Vec::new(),
+            date_epoch: 1700000000,
+            snippet: "Here is the revenue metrics summary...".to_string(),
+            is_read: true,
+            is_flagged: false,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 4096,
+        };
+
+        let msg2 = MessageHeader {
+            id: "msg_fts_2".to_string(),
+            account_id: account.id.clone(),
+            folder_id: folder.id.clone(),
+            uid: 102,
+            message_id: Some("msg2@fts.com".to_string()),
+            in_reply_to: None,
+            subject: "Team Lunch and Offsite Planning".to_string(),
+            from_name: Some("Alice HR".to_string()),
+            from_address: "alice@company.com".to_string(),
+            to_recipients: vec![Recipient::new(Some("Kunal".to_string()), "kunal@company.com".to_string())],
+            cc_recipients: Vec::new(),
+            date_epoch: 1700000100,
+            snippet: "Let us coordinate the upcoming offsite venue...".to_string(),
+            is_read: false,
+            is_flagged: true,
+            is_draft: false,
+            is_deleted: false,
+            body_fetched: true,
+            size_bytes: 2048,
+        };
+
+        storage.save_message_headers(&[msg1.clone(), msg2.clone()]).unwrap();
+        storage.save_message_body(&msg1.id, Some("Comprehensive financial analysis breakdown with Q3 revenue"), None).unwrap();
+        storage.save_message_body(&msg2.id, Some("Offsite event logistics and catering options"), None).unwrap();
+
+        // 1. Search by subject keyword
+        let res1 = storage.search_messages_fts(Some(&account.id), None, "Financial", 10, 0).unwrap();
+        assert_eq!(res1.len(), 1);
+        assert_eq!(res1[0].id, "msg_fts_1");
+
+        // 2. Search by body text keyword (indexed in messages_fts)
+        let res2 = storage.search_messages_fts(Some(&account.id), None, "logistics", 10, 0).unwrap();
+        assert_eq!(res2.len(), 1);
+        assert_eq!(res2[0].id, "msg_fts_2");
+
+        // 3. Search with from: filter
+        let res3 = storage.search_messages_fts(Some(&account.id), None, "from:alice", 10, 0).unwrap();
+        assert_eq!(res3.len(), 1);
+        assert_eq!(res3[0].id, "msg_fts_2");
+
+        // 4. Search with is:unread
+        let res4 = storage.search_messages_fts(Some(&account.id), None, "is:unread", 10, 0).unwrap();
+        assert_eq!(res4.len(), 1);
+        assert_eq!(res4[0].id, "msg_fts_2");
     }
 }
 
