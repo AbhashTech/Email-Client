@@ -193,13 +193,180 @@ Email-Application/
 
 ### 1. System Dependencies (Linux)
 
-Ensure you have the required development libraries installed:
+To compile and run **AT-mail-rs** on Linux, you need development libraries for graphics (Wayland/X11, OpenGL/Vulkan), TLS/networking, the native Secret Service keyring, native file dialogs, and the embedded WebKit engine.
 
+#### 📦 Distribution Package Managers
+
+##### **Ubuntu / Debian / Linux Mint / Pop!_OS**
 ```bash
-# Ubuntu / Debian
 sudo apt update
-sudo apt install build-essential pkg-config libssl-dev libdbus-1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+sudo apt install -y \
+  build-essential \
+  pkg-config \
+  cmake \
+  libssl-dev \
+  libdbus-1-dev \
+  libgtk-3-dev \
+  libwebkit2gtk-4.1-dev \
+  libxkbcommon-dev \
+  libwayland-dev \
+  libx11-dev \
+  libxcb-render0-dev \
+  libxcb-shape0-dev \
+  libxcb-xfixes0-dev \
+  libgl1-mesa-dev
 ```
+
+##### **Arch Linux / Manjaro / EndeavourOS**
+```bash
+sudo pacman -Syu --needed \
+  base-devel \
+  pkgconf \
+  cmake \
+  openssl \
+  dbus \
+  gtk3 \
+  webkit2gtk-4.1 \
+  libxkbcommon \
+  wayland \
+  libx11 \
+  libxcb \
+  mesa \
+  vulkan-icd-loader
+```
+
+##### **Fedora / RHEL 9+ / Rocky Linux / AlmaLinux / CentOS Stream**
+```bash
+sudo dnf check-update
+sudo dnf install -y \
+  gcc \
+  gcc-c++ \
+  make \
+  pkgconf-pkg-config \
+  cmake \
+  openssl-devel \
+  dbus-devel \
+  gtk3-devel \
+  webkit2gtk4.1-devel \
+  libxkbcommon-devel \
+  wayland-devel \
+  libX11-devel \
+  libxcb-devel \
+  mesa-libGL-devel \
+  vulkan-loader-devel
+```
+
+##### **openSUSE (Tumbleweed & Leap)**
+```bash
+sudo zypper refresh
+sudo zypper install -y \
+  patterns-devel-base-devel_basis \
+  pkg-config \
+  cmake \
+  libopenssl-devel \
+  dbus-1-devel \
+  gtk3-devel \
+  webkit2gtk3-devel \
+  libxkbcommon-devel \
+  wayland-devel \
+  libX11-devel \
+  libxcb-devel \
+  Mesa-libGL-devel
+```
+
+##### **Alpine Linux**
+```bash
+sudo apk update
+sudo apk add \
+  build-base \
+  pkgconf \
+  cmake \
+  openssl-dev \
+  dbus-dev \
+  gtk+3.0-dev \
+  webkit2gtk-4.1-dev \
+  libxkbcommon-dev \
+  wayland-dev \
+  libx11-dev \
+  libxcb-dev \
+  mesa-dev
+```
+
+##### **Void Linux**
+```bash
+sudo xbps-install -Syu \
+  base-devel \
+  pkg-config \
+  cmake \
+  openssl-devel \
+  dbus-devel \
+  gtk+3-devel \
+  webkit2gtk-4.1-devel \
+  libxkbcommon-devel \
+  wayland-devel \
+  libX11-devel \
+  libxcb-devel \
+  MesaLib-devel
+```
+
+##### **NixOS (`shell.nix` / `flake.nix`)**
+```nix
+pkgs.mkShell {
+  nativeBuildInputs = with pkgs; [ pkg-config cmake ];
+  buildInputs = with pkgs; [
+    openssl
+    dbus
+    gtk3
+    webkitgtk_4_1
+    libxkbcommon
+    wayland
+    xorg.libX11
+    xorg.libxcb
+    xorg.libXcursor
+    xorg.libXi
+    xorg.libXrandr
+    libGL
+    vulkan-loader
+  ];
+  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+    libGL
+    libxkbcommon
+    wayland
+    vulkan-loader
+  ]);
+}
+```
+
+##### **Gentoo**
+```bash
+sudo emerge --ask \
+  sys-devel/base-devel \
+  dev-util/pkgconf \
+  dev-build/cmake \
+  dev-libs/openssl \
+  sys-apps/dbus \
+  x11-libs/gtk+:3 \
+  net-libs/webkit-gtk:4.1 \
+  x11-libs/libxkbcommon \
+  dev-libs/wayland \
+  x11-libs/libX11 \
+  x11-libs/libxcb \
+  media-libs/mesa
+```
+
+---
+
+#### 💡 Package Breakdown: What & Why Each Package is Required
+
+| Package Category | Typical Package Names | Why It Is Required |
+|---|---|---|
+| **C/C++ Build Toolchain & Meta** | `build-essential`, `base-devel`, `pkg-config`, `cmake`, `gcc`, `make` | Compiles native C libraries, FFI bindings, and SQLite extensions embedded within Rust dependencies (`rusqlite`, `ring`, `winit`). |
+| **TLS & Cryptographic Engine** | `openssl`, `libssl-dev`, `openssl-devel` | Powers secure encrypted TLS/SSL communication for IMAP sync (`async-imap`) and SMTP email delivery (`lettre`). |
+| **OS Secret Service & System Tray** | `dbus`, `libdbus-1-dev`, `dbus-devel` | Enables secure password storage via the Linux Freedesktop Secret Service specification (`keyring-rs` interacting with GNOME Keyring, KWallet, KeePassXC) and enables the StatusNotifierItem desktop system tray daemon. |
+| **Windowing & Input Handling** | `libxkbcommon-dev`, `wayland-dev`, `libx11-dev`, `libxcb-*-dev` | Handles window management, keyboard keymaps, mouse cursors, clipboard cut/copy/paste, and compositor interactions under **Wayland (Hyprland, Sway, GNOME, KDE)** and **X11** sessions. |
+| **GPU & OpenGL Acceleration** | `libgl1-mesa-dev`, `mesa-libGL-devel`, `mesa-dev`, `vulkan-loader` | Delivers sub-100ms hardware-accelerated GPU rendering for the `egui` / `eframe` graphical user interface with silky smooth 60fps animations. |
+| **Native File Dialogs** | `gtk3`, `libgtk-3-dev`, `gtk3-devel` | Used by `rfd` (Rust File Dialog) to spawn OS-native file chooser dialogs for email attachments (`📎 Attach`) and exporting messages (`📤 Export .md / .html / .eml`). |
+| **In-App WebKit HTML Renderer** | `webkit2gtk-4.1`, `libwebkit2gtk-4.1-dev`, `webkit2gtk4.1-devel` | Powers the dedicated native WebKit reader (`[🌐 In-App Web View]`) to render complex, pixel-perfect HTML newsletter layouts with zero Chromium or Electron overhead. |
 
 ### 2. Build & Test the Project
 
