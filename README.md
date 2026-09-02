@@ -1,6 +1,40 @@
 # 🚀 AT-mail-rs: High-Performance, Lightweight Native Email Client in Rust
 
+[![Rust](https://img.shields.io/badge/rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
+[![Memory](https://img.shields.io/badge/memory-%3C45%20MB%20RAM-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
+[![Wayland](https://img.shields.io/badge/display-Wayland%20%7C%20X11-purple.svg)]()
+[![Security](https://img.shields.io/badge/security-PGP%20%2F%20OpenPGP-success.svg)]()
+
 **AT-mail-rs** is an ultra-fast, modern, native cross-platform desktop email client built from the ground up in **pure Rust**. It delivers a clean, responsive desktop user experience with **exceptionally low memory usage (< 45MB resident memory vs 500MB+ for web/Electron-based clients)**, instant sub-100ms cold startup time, and GPU-accelerated rendering.
+
+---
+
+## ⚡ Quick Start & Automated Setup
+
+AT-mail-rs includes an automated, cross-distro setup script (`setup.sh`) that detects your operating system, installs all necessary system dependencies, checks the Rust toolchain, and compiles the application.
+
+```bash
+# 1. Clone repository
+git clone git@github.com:AbhashTech/Email-Client.git
+cd Email-Application
+
+# 2. Run automated setup & launch
+./setup.sh --run
+```
+
+### 🛠️ Setup Script CLI Options (`./setup.sh`)
+
+| Command / Option | Description |
+|---|---|
+| `./setup.sh` | Full automated setup: checks dependencies, verifies Rust, and builds the release binary. |
+| `./setup.sh -y --install` | Unattended setup: installs system packages, builds release, and installs to `~/.local/bin` + creates desktop launcher. |
+| `./setup.sh --run` | Builds the project and immediately launches AT-mail-rs. |
+| `./setup.sh --deps` | Installs system distribution dependencies only (APT, Pacman, DNF, Zypper, APK, XBPS, Homebrew). |
+| `./setup.sh --check` | Validates environment and Rust toolchain without installing packages or building. |
+| `./setup.sh --dev` | Compiles in debug mode instead of release. |
+| `./setup.sh --uninstall` | Removes installed binary and desktop entry from the user system. |
 
 ---
 
@@ -12,6 +46,7 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 |---|---|---|
 | <kbd>Ctrl</kbd> + <kbd>K</kbd> / <kbd>Cmd</kbd> + <kbd>K</kbd> | **Open Command Palette** (Fuzzy command launcher) | Global |
 | <kbd>Ctrl</kbd> + <kbd>P</kbd> | **Open Command Palette** (Alternative hotkey) | Global |
+| <kbd>Ctrl</kbd> + <kbd>,</kbd> / <kbd>Cmd</kbd> + <kbd>,</kbd> | **Open Settings & Preferences** | Global |
 | <kbd>/</kbd> | **Focus Search Bar** | Global |
 | <kbd>j</kbd> or <kbd>↓</kbd> | **Next Email** | Message List |
 | <kbd>k</kbd> or <kbd>↑</kbd> | **Previous Email** | Message List |
@@ -34,8 +69,32 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 ### ⚡ Performance & Core Architecture
 - **Ultra-Low Memory Footprint**: Built in **pure Rust** with GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead. Startup time < 100ms; idle resident memory footprint < 45 MB.
 - **Embedded SQLite WAL Engine**: Full MIME messages, HTML bodies, and plain-text alternatives are indexed and cached locally with Write-Ahead Logging (WAL) for 0ms latency when opening emails.
-- **Async IMAP/SMTP Pipeline**: Full RFC 2047 envelope parsing (`mailparse`), configurable date-window syncing (7d, 14d, 30d, 90d, 1y, All Time), and safe connection pooling.
+- **Async IMAP/SMTP Pipeline**: Full RFC 2047 envelope parsing (`mailparse`), configurable date-window syncing (7d, 14d, 30d, 45d, 60d, 90d, 1y, Custom Days, All Time), and safe connection pooling.
 - **OS-Native Keyring Integration**: Secure credential storage via Linux Secret Service, macOS Keychain, and Windows Credential Manager (`keyring-rs`). Passwords are never stored in plaintext.
+
+---
+
+### 🎨 Dynamic Multi-Theme Engine & Real-Time OS Theme Detection
+The entire interface dynamically adapts across light and dark color schemes, updating cards, sidebars, borders, badges, and reading surfaces in real-time.
+
+Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance` or the `Ctrl+K` Command Palette:
+1. **System Auto (Follow OS)**: Automatically tracks your operating system's dark/light mode preference in real-time, displaying **Dark Slate** in dark mode and **Clean Daylight** in light mode.
+2. **Gruvbox Auto (System)**: Automatically switches between **Gruvbox Retro Dark** & **Gruvbox Retro Light** based on your OS preference.
+3. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents (`#121418`).
+4. **Gruvbox Retro Dark**: Warm retro groove dark palette with amber and gold accents (`#282828`).
+5. **Gruvbox Retro Light**: Warm retro groove light parchment palette with ochre accents (`#fbf1c7`).
+6. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights (`#1e1e2e`).
+7. **Nord Arctic**: Crisp north-bluish dark aesthetic (`#2e3440`).
+8. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette (`#002b36`).
+9. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and maximum battery savings.
+10. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments (`#f5f7fa`).
+11. **🎨 Custom Theme Creator**: Full interactive color pickers for App Background, Sidebar, Reading Pane, Cards, Accents, Borders, and Text. Custom themes are saved as standalone JSON files in the OS config folder (`~/.config/at-mail-rs/themes/<theme_name>.json`) and can be exported, imported, and applied on the fly.
+
+#### 🌓 Real-Time OS Appearance Integration:
+- **Linux (Wayland & X11)**: Queries the **XDG Desktop Portal** and GNOME `gsettings get org.gnome.desktop.interface color-scheme` (`'prefer-dark'` vs `'prefer-light'`), with fallback to `$GTK_THEME`.
+- **macOS**: Queries Apple interface style (`defaults read -g AppleInterfaceStyle`).
+- **Windows**: Checks the user personalize registry setting `AppsUseLightTheme`.
+- **GPU Render Loop**: Automatically hot-reloads styling and repaints the GPU frame buffer without requiring an application restart.
 
 ---
 
@@ -124,29 +183,6 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 
 ---
 
-### 🎨 Multi-Theme Engine & System-Based Auto Switching
-Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance` or the `Ctrl+K` Command Palette:
-1. **System Auto (Follow OS)**: Automatically tracks your operating system's dark/light mode preference in real-time, displaying **Dark Slate** in dark mode and **Clean Daylight** in light mode.
-2. **Gruvbox Auto (System)**: Automatically switches between **Gruvbox Retro Dark** & **Gruvbox Retro Light** based on your OS preference.
-3. **Dark Slate (Default)**: Sleek charcoal surface with Google Blue accents (`#121418`).
-4. **Gruvbox Retro Dark**: Warm retro groove dark palette with amber and gold accents (`#282828`).
-5. **Gruvbox Retro Light**: Warm retro groove light parchment palette with ochre accents (`#fbf1c7`).
-6. **Catppuccin Mocha**: Soothing pastel dark palette with lavender highlights (`#1e1e2e`).
-7. **Nord Arctic**: Crisp north-bluish dark aesthetic (`#2e3440`).
-8. **Solarized Dark**: Precision low-contrast cyan and warm-green dark palette (`#002b36`).
-9. **OLED Pure Black**: True `#000000` pitch-black mode for OLED displays and battery savings.
-10. **Clean Daylight**: Modern, crisp daylight theme for well-lit environments (`#f5f7fa`).
-11. **🎨 Custom Theme Creator**: Full interactive color pickers for App Background, Sidebar, Reading Pane, Cards, Accents, Borders, and Text. Custom themes are saved as standalone JSON files in the OS config folder (`~/.config/at-mail-rs/themes/<theme_name>.json`) and can be exported, imported, and applied on the fly.
-
-#### 🌓 How Automatic System Theme Detection Works:
-The application polls the operating system's native appearance API in real-time to adapt instantly without requiring an application restart:
-- **Linux (Wayland & X11)**: Queries the **XDG Desktop Portal** and GNOME `gsettings get org.gnome.desktop.interface color-scheme` (`'prefer-dark'` vs `'prefer-light'`), with fallback to `$GTK_THEME`.
-- **macOS**: Queries Apple interface style (`defaults read -g AppleInterfaceStyle`).
-- **Windows**: Checks the user personalize registry setting `AppsUseLightTheme`.
-- **GPU Render Loop**: When the OS theme preference switches (e.g. at sunset or via scheduled desktop dark mode), the client's event loop automatically hot-reloads the visual styling and repaints the GPU frame buffer dynamically.
-
----
-
 ### 📁 Storage Path Inspector & Data Relocation
 - **Path Inspection**: View the exact live filepaths for the SQLite database (`email_client.db`), OS configuration directory (`~/.config/at-mail-rs/`), and custom themes.
 - **📁 Relocate / Move Data Directory**: 1-click migration tool in *Settings -> General & Storage* that safely copies the database and WAL files to any chosen custom directory (e.g. secondary SSD or encrypted vault) and updates the application configuration pointer.
@@ -185,27 +221,26 @@ Select how many days of emails to synchronize during account setup or in setting
 ```
 Email-Application/
 ├── Cargo.toml               # Workspace manifest
+├── setup.sh                 # Cross-platform automated setup & installer
 ├── crates/
-│   ├── email-core/          # Domain models, errors, event definitions (SyncCommand / SyncEvent)
-│   ├── email-keychain/      # Native OS Keyring abstraction layer
-│   ├── email-storage/       # SQLite storage engine with connection pooling (r2d2), WAL mode, and structured search
+│   ├── email-core/          # Domain models, errors, event definitions (SyncCommand / SyncEvent), PGP crypto
+│   ├── email-keychain/      # Native OS Keyring abstraction layer (Secret Service / Keychain / Credential Manager)
+│   ├── email-storage/       # SQLite storage engine with connection pooling (r2d2), WAL mode, FTS5 search, and schema migrations
 │   ├── email-smtp/          # Asynchronous SMTP client (lettre + tokio-rustls)
-│   ├── email-sync/          # IMAP synchronization actor (async-imap + mailparse)
+│   ├── email-sync/          # IMAP synchronization actor (async-imap + mailparse) with IDLE and background worker
 │   ├── email-html/          # HTML AST sanitizer, Markdown compiler, phishing detector, and plain-text extractor
-│   └── email-ui/            # Native desktop GUI (eframe / egui) with 3-pane layout, themes, command palette, and settings
+│   └── email-ui/            # Native desktop GUI (eframe / egui / wry) with 3-pane layout, themes, command palette, and settings
 ```
 
 ---
 
-## 🛠️ Prerequisites & Build Instructions
+## 🛠️ Manual Build & System Prerequisites
 
-### 1. System Dependencies (Linux)
+If you prefer to install dependencies and build manually without `setup.sh`:
 
-To compile and run **AT-mail-rs** on Linux, you need development libraries for graphics (Wayland/X11, OpenGL/Vulkan), TLS/networking, the native Secret Service keyring, native file dialogs, and the embedded WebKit engine.
+### 1. Distribution Package Managers
 
-#### 📦 Distribution Package Managers
-
-##### **Ubuntu / Debian / Linux Mint / Pop!_OS**
+#### **Ubuntu / Debian / Linux Mint / Pop!_OS**
 ```bash
 sudo apt update
 sudo apt install -y \
@@ -225,7 +260,7 @@ sudo apt install -y \
   libgl1-mesa-dev
 ```
 
-##### **Arch Linux / Manjaro / EndeavourOS**
+#### **Arch Linux / Manjaro / EndeavourOS**
 ```bash
 sudo pacman -Syu --needed \
   base-devel \
@@ -243,7 +278,7 @@ sudo pacman -Syu --needed \
   vulkan-icd-loader
 ```
 
-##### **Fedora / RHEL 9+ / Rocky Linux / AlmaLinux / CentOS Stream**
+#### **Fedora / RHEL 9+ / Rocky Linux / AlmaLinux / CentOS Stream**
 ```bash
 sudo dnf check-update
 sudo dnf install -y \
@@ -264,7 +299,7 @@ sudo dnf install -y \
   vulkan-loader-devel
 ```
 
-##### **openSUSE (Tumbleweed & Leap)**
+#### **openSUSE (Tumbleweed & Leap)**
 ```bash
 sudo zypper refresh
 sudo zypper install -y \
@@ -282,7 +317,7 @@ sudo zypper install -y \
   Mesa-libGL-devel
 ```
 
-##### **Alpine Linux**
+#### **Alpine Linux**
 ```bash
 sudo apk update
 sudo apk add \
@@ -300,7 +335,7 @@ sudo apk add \
   mesa-dev
 ```
 
-##### **Void Linux**
+#### **Void Linux**
 ```bash
 sudo xbps-install -Syu \
   base-devel \
@@ -317,72 +352,16 @@ sudo xbps-install -Syu \
   MesaLib-devel
 ```
 
-##### **NixOS (`shell.nix` / `flake.nix`)**
-```nix
-pkgs.mkShell {
-  nativeBuildInputs = with pkgs; [ pkg-config cmake ];
-  buildInputs = with pkgs; [
-    openssl
-    dbus
-    gtk3
-    webkitgtk_4_1
-    libxkbcommon
-    wayland
-    xorg.libX11
-    xorg.libxcb
-    xorg.libXcursor
-    xorg.libXi
-    xorg.libXrandr
-    libGL
-    vulkan-loader
-  ];
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
-    libGL
-    libxkbcommon
-    wayland
-    vulkan-loader
-  ]);
-}
-```
-
-##### **Gentoo**
+#### **macOS (Homebrew)**
 ```bash
-sudo emerge --ask \
-  sys-devel/base-devel \
-  dev-util/pkgconf \
-  dev-build/cmake \
-  dev-libs/openssl \
-  sys-apps/dbus \
-  x11-libs/gtk+:3 \
-  net-libs/webkit-gtk:4.1 \
-  x11-libs/libxkbcommon \
-  dev-libs/wayland \
-  x11-libs/libX11 \
-  x11-libs/libxcb \
-  media-libs/mesa
+brew install pkg-config cmake openssl dbus
 ```
 
 ---
 
-#### 💡 Package Breakdown: What & Why Each Package is Required
-
-| Package Category | Typical Package Names | Why It Is Required |
-|---|---|---|
-| **C/C++ Build Toolchain & Meta** | `build-essential`, `base-devel`, `pkg-config`, `cmake`, `gcc`, `make` | Compiles native C libraries, FFI bindings, and SQLite extensions embedded within Rust dependencies (`rusqlite`, `ring`, `winit`). |
-| **TLS & Cryptographic Engine** | `openssl`, `libssl-dev`, `openssl-devel` | Powers secure encrypted TLS/SSL communication for IMAP sync (`async-imap`) and SMTP email delivery (`lettre`). |
-| **OS Secret Service & System Tray** | `dbus`, `libdbus-1-dev`, `dbus-devel` | Enables secure password storage via the Linux Freedesktop Secret Service specification (`keyring-rs` interacting with GNOME Keyring, KWallet, KeePassXC) and enables the StatusNotifierItem desktop system tray daemon. |
-| **Windowing & Input Handling** | `libxkbcommon-dev`, `wayland-dev`, `libx11-dev`, `libxcb-*-dev` | Handles window management, keyboard keymaps, mouse cursors, clipboard cut/copy/paste, and compositor interactions under **Wayland (Hyprland, Sway, GNOME, KDE)** and **X11** sessions. |
-| **GPU & OpenGL Acceleration** | `libgl1-mesa-dev`, `mesa-libGL-devel`, `mesa-dev`, `vulkan-loader` | Delivers sub-100ms hardware-accelerated GPU rendering for the `egui` / `eframe` graphical user interface with silky smooth 60fps animations. |
-| **Native File Dialogs** | `gtk3`, `libgtk-3-dev`, `gtk3-devel` | Used by `rfd` (Rust File Dialog) to spawn OS-native file chooser dialogs for email attachments (`📎 Attach`) and exporting messages (`📤 Export .md / .html / .eml`). |
-| **In-App WebKit HTML Renderer** | `webkit2gtk-4.1`, `libwebkit2gtk-4.1-dev`, `webkit2gtk4.1-devel` | Powers the dedicated native WebKit reader (`[🌐 In-App Web View]`) to render complex, pixel-perfect HTML newsletter layouts with zero Chromium or Electron overhead. |
-
-### 2. Build & Test the Project
+### 2. Compile & Run
 
 ```bash
-# Clone repository
-git clone git@github.com:AbhashTech/Email-Client.git
-cd Email-Application
-
 # Check workspace compilation
 cargo check --workspace
 
@@ -391,6 +370,9 @@ cargo test --workspace
 
 # Build optimized release binary
 cargo build --release
+
+# Run client
+cargo run --release --bin email-ui
 ```
 
 The compiled binary will be located at:
@@ -398,19 +380,15 @@ The compiled binary will be located at:
 
 ---
 
-## 🚀 Running the Client
+## 🚀 First-Time Account Setup
 
-```bash
-cargo run --release --bin email-ui
-```
-
-### First-Time Setup:
-1. Launch the application.
-2. Click **`+ Add Account`** in the sidebar or from `⚙ Settings -> 📬 Accounts`.
-3. Select your provider preset (e.g. Zoho Mail, Gmail, Outlook, Hostinger, or Custom IMAP/SMTP).
-4. Enter your email and app-specific password.
-5. Click **`Save & Connect`**.
-6. Click **`🔄 Sync All`** to synchronize your mailbox!
+1. Launch the application (`./setup.sh --run` or `cargo run --release --bin email-ui`).
+2. Click **`+ Add Account`** in the sidebar or navigate to `⚙ Settings -> 📬 Accounts`.
+3. Select your provider preset (e.g. Gmail, Outlook, Yahoo, or Custom IMAP/SMTP).
+4. Enter your Display Name, Email Address, and App-Specific Password / Token.
+5. Click **`⚡ Test Connection`** to verify server connectivity.
+6. Click **`💾 Save & Sync`**.
+7. Click **`🔄 Sync All`** to synchronize your mailbox!
 
 ---
 
