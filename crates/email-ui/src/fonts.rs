@@ -26,6 +26,8 @@ pub fn configure_fonts(ctx: &egui::Context) {
         ("NotoSansMyanmar", include_bytes!("../assets/fonts/NotoSansMyanmar-Regular.ttf")),
         // East Asian (Chinese, Japanese, Korean)
         ("NotoSansCJK", include_bytes!("../assets/fonts/NotoSansCJK-Regular.ttc")),
+        // Universal symbols, geometrical shapes, arrows, pictographs & modern glyphs
+        ("NotoSansSymbols2", include_bytes!("../assets/fonts/NotoSansSymbols2-Regular.ttf")),
     ];
 
     for (name, bytes) in embedded_fonts {
@@ -116,4 +118,60 @@ mod tests {
             });
         });
     }
+
+    #[test]
+    fn test_find_all_missing_glyphs_in_codebase() {
+        let ctx = egui::Context::default();
+        configure_fonts(&ctx);
+
+        let mut missing_by_char: std::collections::BTreeMap<char, Vec<String>> = std::collections::BTreeMap::new();
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            ctx.fonts(|fonts| {
+                let font_id = egui::FontId::proportional(14.0);
+
+                let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+                for entry in walkdir(src_dir) {
+                    if entry.extension().and_then(|s| s.to_str()) == Some("rs") {
+                        let content = std::fs::read_to_string(&entry).unwrap();
+                        for (line_idx, line) in content.lines().enumerate() {
+                            for c in line.chars() {
+                                if !c.is_ascii() && !c.is_whitespace() {
+                                    if !fonts.has_glyph(&font_id, c) {
+                                        let loc = format!("{}:{}: {}", entry.file_name().unwrap().to_string_lossy(), line_idx + 1, line.trim());
+                                        missing_by_char.entry(c).or_default().push(loc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+        for (c, locs) in &missing_by_char {
+            println!("MISSING GLYPH: U+{:04X} ('{}') in {} places:", *c as u32, c, locs.len());
+            for loc in locs.iter().take(3) {
+                println!("    {}", loc);
+            }
+        }
+    }
+
+    fn walkdir(dir: std::path::PathBuf) -> Vec<std::path::PathBuf> {
+        let mut results = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    results.extend(walkdir(path));
+                } else {
+                    results.push(path);
+                }
+            }
+        }
+        results
+    }
 }
+
+
+

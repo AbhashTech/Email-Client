@@ -900,7 +900,7 @@ impl App for EmailApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Window Controls: Close (×), Maximize/Restore (◻/⧉), Minimize (−)
+                    // Window Controls: Close (×), Maximize/Restore (□/❐), Minimize (−)
                     let close_btn = egui::Button::new(
                         RichText::new("×")
                             .size(15.0)
@@ -915,7 +915,7 @@ impl App for EmailApp {
                         self.handle_close_requested(ctx);
                     }
 
-                    let max_label = if self.is_maximized { "⧉" } else { "◻" };
+                    let max_label = if self.is_maximized { "❐" } else { "□" };
                     let max_btn = egui::Button::new(
                         RichText::new(max_label)
                             .size(12.0)

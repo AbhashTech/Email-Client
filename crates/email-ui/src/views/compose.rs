@@ -553,7 +553,7 @@ impl ComposeView {
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     if let Some(sig) = attached_sig {
-                                        ui.label(RichText::new("🖋️ Attached Signature:").size(12.0).strong().color(AppTheme::accent(ui)));
+                                        ui.label(RichText::new("✍ Attached Signature:").size(12.0).strong().color(AppTheme::accent(ui)));
                                         ui.label(RichText::new(&sig.name).size(12.0).strong().color(AppTheme::text_primary(ui)));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -574,7 +574,7 @@ impl ComposeView {
                                                 });
                                         });
                                     } else {
-                                        ui.label(RichText::new("🖋️ No signature attached").size(12.0).color(AppTheme::text_muted(ui)));
+                                        ui.label(RichText::new("✍ No signature attached").size(12.0).color(AppTheme::text_muted(ui)));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             egui::ComboBox::from_id_salt("compose_sig_add_combo")
                                                 .selected_text("+ Attach Signature")

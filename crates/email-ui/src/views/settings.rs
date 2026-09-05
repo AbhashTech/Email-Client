@@ -1068,7 +1068,7 @@ impl SettingsView {
             .rounding(Rounding::same(8.0))
             .inner_margin(14.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("When clicking Window Close Button (✕):").strong().color(AppTheme::text_primary(ui)));
+                ui.label(RichText::new("When clicking Window Close Button (×):").strong().color(AppTheme::text_primary(ui)));
                 ui.add_space(6.0);
 
                 let mut cfg = load_app_config();
