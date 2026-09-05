@@ -32,6 +32,7 @@ pub struct EmailApp {
     folders_by_account: HashMap<String, Vec<Folder>>,
     messages: Vec<MessageHeader>,
     selected_message_detail: Option<MessageDetail>,
+    selected_thread_messages: Vec<MessageDetail>,
     templates: Vec<Template>,
     signatures: Vec<Signature>,
 
@@ -112,6 +113,7 @@ impl EmailApp {
             folders_by_account: HashMap::new(),
             messages: Vec::new(),
             selected_message_detail: None,
+            selected_thread_messages: Vec::new(),
             templates: Vec::new(),
             signatures: Vec::new(),
             selected_folder: FolderSelection::UnifiedUnread,
@@ -181,7 +183,11 @@ impl EmailApp {
         self.scheduled_count = self.storage.list_all_scheduled(None).unwrap_or_default().len();
         self.outbox_count = self.storage.get_all_outbox_items(None).unwrap_or_default().len();
 
-        // Update unread count for system tray
+        self.update_tray_unread();
+        self.reload_messages();
+    }
+
+    pub fn update_tray_unread(&self) {
         let total_unread: u32 = self
             .folders_by_account
             .values()
@@ -192,8 +198,20 @@ impl EmailApp {
         if let Some(ref tray) = self.tray {
             tray.update_unread_count(total_unread);
         }
+    }
 
-        self.reload_messages();
+    pub fn load_selected_thread(&mut self) {
+        if let Some(ref detail) = self.selected_message_detail {
+            self.selected_thread_messages = self
+                .storage
+                .get_conversation_thread(&detail.header.id)
+                .ok()
+                .flatten()
+                .map(|t| t.messages)
+                .unwrap_or_else(|| vec![detail.clone()]);
+        } else {
+            self.selected_thread_messages.clear();
+        }
     }
 
     pub fn reload_messages(&mut self) {
@@ -246,7 +264,7 @@ impl EmailApp {
                 }
             }
             FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
-                if let Ok(mut msgs) = self.storage.get_messages(None, None, 500, 0, search) {
+                if let Ok(mut msgs) = self.storage.get_messages(None, None, 150, 0, search) {
                     if matches!(self.selected_folder, FolderSelection::UnifiedFlagged) {
                         msgs.retain(|m| m.is_flagged);
                     } else if matches!(self.selected_folder, FolderSelection::UnifiedUnread) {
@@ -262,7 +280,7 @@ impl EmailApp {
                 if let Ok(msgs) = self.storage.get_messages(
                     Some(account_id),
                     Some(folder_id),
-                    500,
+                    150,
                     0,
                     search,
                 ) {
@@ -326,8 +344,20 @@ impl EmailApp {
                     self.is_syncing = is_syncing;
                     self.status_text = status_text;
                 }
-                SyncEvent::FolderSynced { .. } => {
-                    self.reload_data();
+                SyncEvent::FolderSynced {
+                    account_id,
+                    folder_id: _,
+                    new_messages_count,
+                } => {
+                    if new_messages_count > 0 {
+                        self.reload_data();
+                    } else {
+                        // Light-weight folder update without full reload
+                        if let Ok(folders) = self.storage.get_folders_for_account(&account_id) {
+                            self.folders_by_account.insert(account_id, folders);
+                            self.update_tray_unread();
+                        }
+                    }
                 }
                 SyncEvent::FoldersDiscovered {
                     account_id: _,
@@ -342,6 +372,7 @@ impl EmailApp {
                 SyncEvent::BodyFetched { message_id, detail } => {
                     if self.selected_message_id.as_deref() == Some(&message_id) {
                         self.selected_message_detail = Some(*detail.clone());
+                        self.load_selected_thread();
                     }
                     if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
                         *m = detail.header.clone();
@@ -375,7 +406,7 @@ impl EmailApp {
     }
 
     pub fn check_outbox_queue(&mut self) {
-        if self.last_outbox_check.elapsed() < std::time::Duration::from_secs(3) {
+        if self.last_outbox_check.elapsed() < std::time::Duration::from_secs(10) {
             return;
         }
         self.last_outbox_check = std::time::Instant::now();
@@ -406,7 +437,7 @@ impl EmailApp {
     }
 
     pub fn check_snoozed_queue(&mut self) {
-        if self.last_snoozed_check.elapsed() < std::time::Duration::from_secs(3) {
+        if self.last_snoozed_check.elapsed() < std::time::Duration::from_secs(10) {
             return;
         }
         self.last_snoozed_check = std::time::Instant::now();
@@ -446,7 +477,7 @@ impl EmailApp {
     }
 
     pub fn check_scheduled_queue(&mut self) {
-        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(3) {
+        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(10) {
             return;
         }
         self.last_scheduled_check = std::time::Instant::now();
@@ -678,8 +709,23 @@ impl EmailApp {
                             uid: m.uid,
                             is_read: true,
                         });
+                        if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                            if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                                f.unread_messages = f.unread_messages.saturating_sub(1);
+                            }
+                        }
                     }
-                    self.reload_data();
+                    if let Some(ref mut detail) = self.selected_message_detail {
+                        if &detail.header.id == mid {
+                            detail.header.is_read = true;
+                        }
+                    }
+                    for tm in &mut self.selected_thread_messages {
+                        if &tm.header.id == mid {
+                            tm.header.is_read = true;
+                        }
+                    }
+                    self.update_tray_unread();
                 }
             }
             PaletteAction::MarkUnread => {
@@ -693,14 +739,30 @@ impl EmailApp {
                             uid: m.uid,
                             is_read: false,
                         });
+                        if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                            if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                                f.unread_messages += 1;
+                            }
+                        }
                     }
-                    self.reload_data();
+                    if let Some(ref mut detail) = self.selected_message_detail {
+                        if &detail.header.id == mid {
+                            detail.header.is_read = false;
+                        }
+                    }
+                    for tm in &mut self.selected_thread_messages {
+                        if &tm.header.id == mid {
+                            tm.header.is_read = false;
+                        }
+                    }
+                    self.update_tray_unread();
                 }
             }
             PaletteAction::ToggleStar => {
                 if let Some(ref mid) = self.selected_message_id {
+                    let mut new_flag = false;
                     if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
-                        let new_flag = !m.is_flagged;
+                        new_flag = !m.is_flagged;
                         m.is_flagged = new_flag;
                         let _ = self.storage.set_message_flagged(mid, new_flag);
                         let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
@@ -710,7 +772,16 @@ impl EmailApp {
                             is_flagged: new_flag,
                         });
                     }
-                    self.reload_data();
+                    if let Some(ref mut detail) = self.selected_message_detail {
+                        if &detail.header.id == mid {
+                            detail.header.is_flagged = new_flag;
+                        }
+                    }
+                    for tm in &mut self.selected_thread_messages {
+                        if &tm.header.id == mid {
+                            tm.header.is_flagged = new_flag;
+                        }
+                    }
                 }
             }
             PaletteAction::DeleteSelected => {
@@ -735,6 +806,7 @@ impl EmailApp {
                 self.selected_message_ids.clear();
                 self.selected_message_id = None;
                 self.selected_message_detail = None;
+                self.selected_thread_messages.clear();
                 self.reload_data();
             }
             PaletteAction::Reply => {
@@ -1166,9 +1238,28 @@ impl App for EmailApp {
                         uid: m.uid,
                         is_read,
                     });
+                    if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                        if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                            if is_read {
+                                f.unread_messages = f.unread_messages.saturating_sub(1);
+                            } else {
+                                f.unread_messages += 1;
+                            }
+                        }
+                    }
+                }
+                if let Some(ref mut detail) = self.selected_message_detail {
+                    if &detail.header.id == mid {
+                        detail.header.is_read = is_read;
+                    }
+                }
+                for tm in &mut self.selected_thread_messages {
+                    if &tm.header.id == mid {
+                        tm.header.is_read = is_read;
+                    }
                 }
             }
-            self.reload_data();
+            self.update_tray_unread();
         }
 
         if let Some((ids, is_flag)) = on_batch_toggle_flag {
@@ -1183,8 +1274,17 @@ impl App for EmailApp {
                         is_flagged: is_flag,
                     });
                 }
+                if let Some(ref mut detail) = self.selected_message_detail {
+                    if &detail.header.id == mid {
+                        detail.header.is_flagged = is_flag;
+                    }
+                }
+                for tm in &mut self.selected_thread_messages {
+                    if &tm.header.id == mid {
+                        tm.header.is_flagged = is_flag;
+                    }
+                }
             }
-            self.reload_data();
         }
 
         if let Some((msg_id, is_read)) = on_toggle_read {
@@ -1197,13 +1297,27 @@ impl App for EmailApp {
                     uid: m.uid,
                     is_read,
                 });
+                if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                    if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                        if is_read {
+                            f.unread_messages = f.unread_messages.saturating_sub(1);
+                        } else {
+                            f.unread_messages += 1;
+                        }
+                    }
+                }
             }
             if let Some(ref mut detail) = self.selected_message_detail {
                 if detail.header.id == msg_id {
                     detail.header.is_read = is_read;
                 }
             }
-            self.reload_data();
+            for tm in &mut self.selected_thread_messages {
+                if tm.header.id == msg_id {
+                    tm.header.is_read = is_read;
+                }
+            }
+            self.update_tray_unread();
         }
 
         if let Some((msg_id, is_flag)) = on_toggle_flag {
@@ -1222,7 +1336,11 @@ impl App for EmailApp {
                     detail.header.is_flagged = is_flag;
                 }
             }
-            self.reload_data();
+            for tm in &mut self.selected_thread_messages {
+                if tm.header.id == msg_id {
+                    tm.header.is_flagged = is_flag;
+                }
+            }
         }
 
         if prev_msg_id != self.selected_message_id {
@@ -1237,12 +1355,21 @@ impl App for EmailApp {
                             uid: m.uid,
                             is_read: true,
                         });
+                        if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                            if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                                f.unread_messages = f.unread_messages.saturating_sub(1);
+                            }
+                        }
                     }
                 }
                 if let Ok(detail_opt) = self.storage.get_message_detail(mid) {
                     self.selected_message_detail = detail_opt;
                 }
-                self.reload_data();
+                self.load_selected_thread();
+                self.update_tray_unread();
+            } else {
+                self.selected_message_detail = None;
+                self.selected_thread_messages.clear();
             }
         }
 
@@ -1267,20 +1394,10 @@ impl App for EmailApp {
             Vec::new()
         };
 
-        let thread_messages = if let Some(ref detail) = self.selected_message_detail {
-            self.storage.get_conversation_thread(&detail.header.id)
-                .ok()
-                .flatten()
-                .map(|t| t.messages)
-                .unwrap_or_else(|| vec![detail.clone()])
-        } else {
-            Vec::new()
-        };
-
         egui::CentralPanel::default().show(ctx, |ui| {
             MessageViewPane::show(
                 ui,
-                &thread_messages,
+                &self.selected_thread_messages,
                 &active_folders,
                 &mut self.allowed_remote_images,
                 &self.cmd_tx,
@@ -1393,13 +1510,27 @@ impl App for EmailApp {
                     uid: m.uid,
                     is_read,
                 });
+                if let Some(folders) = self.folders_by_account.get_mut(&m.account_id) {
+                    if let Some(f) = folders.iter_mut().find(|f| f.id == m.folder_id) {
+                        if is_read {
+                            f.unread_messages = f.unread_messages.saturating_sub(1);
+                        } else {
+                            f.unread_messages += 1;
+                        }
+                    }
+                }
             }
             if let Some(ref mut detail) = self.selected_message_detail {
                 if detail.header.id == msg_id {
                     detail.header.is_read = is_read;
                 }
             }
-            self.reload_data();
+            for tm in &mut self.selected_thread_messages {
+                if tm.header.id == msg_id {
+                    tm.header.is_read = is_read;
+                }
+            }
+            self.update_tray_unread();
         }
 
         if let Some((msg_id, target_folder_id)) = on_move_folder {
@@ -1428,6 +1559,7 @@ impl App for EmailApp {
             }
             self.selected_message_id = None;
             self.selected_message_detail = None;
+            self.selected_thread_messages.clear();
             self.reload_data();
             let target_folder_name = self
                 .folders_by_account
@@ -1443,9 +1575,21 @@ impl App for EmailApp {
 
         if let Some((msg_id, snooze_until)) = on_snooze {
             let _ = self.storage.snooze_message(&msg_id, snooze_until);
-            if let Some(ref mut detail) = self.selected_message_detail {
-                if detail.header.id == msg_id {
-                    detail.header.snooze_until = snooze_until;
+            if snooze_until.is_some() {
+                self.messages.retain(|m| m.id != msg_id);
+                self.selected_message_id = None;
+                self.selected_message_detail = None;
+                self.selected_thread_messages.clear();
+            } else {
+                if let Some(ref mut detail) = self.selected_message_detail {
+                    if detail.header.id == msg_id {
+                        detail.header.snooze_until = snooze_until;
+                    }
+                }
+                for tm in &mut self.selected_thread_messages {
+                    if tm.header.id == msg_id {
+                        tm.header.snooze_until = snooze_until;
+                    }
                 }
             }
             self.reload_data();
@@ -1462,6 +1606,7 @@ impl App for EmailApp {
             }
             self.selected_message_id = None;
             self.selected_message_detail = None;
+            self.selected_thread_messages.clear();
             self.reload_data();
         }
 

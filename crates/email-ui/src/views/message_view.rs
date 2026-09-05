@@ -714,7 +714,13 @@ impl MessageViewPane {
 
         ui.scope(|ui| {
             if let Some(ref html) = detail.body_html {
-                let blocks = parse_html_to_blocks(html);
+                let cache_id = ui.make_persistent_id(format!("parsed_html_blocks_{}", msg.id));
+                let blocks = ui.data_mut(|d| {
+                    d.get_temp_mut_or_insert_with(cache_id, || {
+                        std::sync::Arc::new(parse_html_to_blocks(html))
+                    })
+                    .clone()
+                });
                 if blocks.is_empty() {
                     if let Some(ref plain) = detail.body_plain {
                         ui.scope(|ui| {
@@ -747,6 +753,35 @@ impl MessageViewPane {
                         ui.add_space(8.0);
                     }
 
+                    // Complex Script (Indic / Arabic) Typography Helper Banner
+                    let has_complex_script = html.chars().any(|c| {
+                        matches!(c as u32, 0x0600..=0x06FF | 0x0900..=0x0DFF)
+                    });
+                    if has_complex_script {
+                        ui.add_space(4.0);
+                        let banner_width = wrap_width.min(600.0).max(320.0);
+                        ui.vertical_centered(|ui| {
+                            let (banner_rect, _) = ui.allocate_exact_size(Vec2::new(banner_width, 34.0), Sense::hover());
+                            ui.painter().rect_filled(banner_rect, Rounding::same(6.0), Color32::from_rgb(238, 242, 255));
+                            ui.painter().rect_stroke(banner_rect, Rounding::same(6.0), Stroke::new(1.0_f32, Color32::from_rgb(199, 210, 254)));
+                            let mut banner_ui = ui.new_child(egui::UiBuilder::new().max_rect(banner_rect));
+                            banner_ui.horizontal_centered(|ui| {
+                                ui.add_space(10.0);
+                                ui.label(RichText::new("📖").size(13.0));
+                                ui.label(RichText::new("Contains Indic/complex script.").size(12.0).color(Color32::from_rgb(49, 46, 129)));
+                                if ui.button(RichText::new("🌐 Open in WebKit Reader").size(11.0).strong()).on_hover_text("View with native HarfBuzz complex text shaping & full ligatures").clicked() {
+                                    let subject_title = if msg.subject.trim().is_empty() {
+                                        "Email Preview".to_string()
+                                    } else {
+                                        msg.subject.clone()
+                                    };
+                                    crate::webview::open_webview_window(subject_title, detail);
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                    }
+
                     // Centered Canvas Container (like Gmail)
                     ui.vertical_centered(|ui| {
                         egui::Frame::none()
@@ -758,10 +793,10 @@ impl MessageViewPane {
                                 let canvas_width = wrap_width.min(600.0).max(320.0);
                                 ui.set_max_width(canvas_width);
 
-                                for block in blocks {
+                                for block in blocks.as_slice() {
                                     match block {
                                         HtmlBlock::Paragraph { spans, is_center } => {
-                                            if is_center {
+                                            if *is_center {
                                                 ui.vertical_centered(|ui| {
                                                     render_spans(ui, &spans, canvas_width, true);
                                                 });
@@ -773,19 +808,19 @@ impl MessageViewPane {
                                         HtmlBlock::Heading { level, text, is_center, color } => {
                                             ui.add_space(8.0);
                                             let mut rt = RichText::new(text).strong();
-                                            if level == 1 {
+                                            if *level == 1 {
                                                 rt = rt.size(24.0);
                                             } else {
                                                 rt = rt.size(18.0);
                                             }
 
                                             if let Some((r, g, b)) = color {
-                                                rt = rt.color(Color32::from_rgb(r, g, b));
+                                                rt = rt.color(Color32::from_rgb(*r, *g, *b));
                                             } else {
                                                 rt = rt.color(Color32::from_rgb(33, 37, 41));
                                             }
 
-                                            if is_center {
+                                            if *is_center {
                                                 ui.vertical_centered(|ui| {
                                                     ui.heading(rt);
                                                 });
@@ -824,7 +859,7 @@ impl MessageViewPane {
                                                 if is_suspicious {
                                                     response.clone().on_hover_text(format!("⚠️ Suspicious Link Detected!\nText claims: '{}'\nActual destination: '{}'", text, url));
                                                 } else {
-                                                    response.clone().on_hover_text(&url);
+                                                    response.clone().on_hover_text(url.as_str());
                                                 }
 
                                                 if response.clicked() {
@@ -832,7 +867,7 @@ impl MessageViewPane {
                                                 }
                                             };
 
-                                            if is_center {
+                                            if *is_center {
                                                 ui.vertical_centered(|ui| {
                                                     btn_ui(ui);
                                                 });
@@ -883,7 +918,7 @@ impl MessageViewPane {
                                                             });
                                                         });
                                                 };
-                                                if is_center {
+                                                if *is_center {
                                                     ui.vertical_centered(|ui| block_ui(ui));
                                                 } else {
                                                     block_ui(ui);
@@ -919,7 +954,7 @@ impl MessageViewPane {
 
                                                     // Right-click to Save Image As...
                                                     let save_uri = resolved_uri.clone();
-                                                    let default_name = alt.clone().unwrap_or_else(|| "email_image.png".to_string());
+                                                    let default_name = alt.as_ref().cloned().unwrap_or_else(|| "email_image.png".to_string());
                                                     response.context_menu(|ui| {
                                                         ui.label(RichText::new("Image Options").strong().size(11.0));
                                                         ui.separator();
@@ -942,14 +977,14 @@ impl MessageViewPane {
                                                                         }
                                                                     }
                                                                 }
-                                                            });
-                                                            *status_toast = Some("Opening file picker...".to_string());
-                                                            ui.close_menu();
+                                                             });
+                                                             *status_toast = Some("Opening file picker...".to_string());
+                                                             ui.close_menu();
                                                         }
                                                     });
                                                 };
 
-                                                if is_center {
+                                                if *is_center {
                                                     ui.vertical_centered(|ui| {
                                                         img_render(ui);
                                                     });

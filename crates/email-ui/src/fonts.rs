@@ -40,12 +40,13 @@ pub fn configure_fonts(ctx: &egui::Context) {
             .entry(egui::FontFamily::Proportional)
             .or_default()
             .push(name.to_string());
-        fonts
-            .families
-            .entry(egui::FontFamily::Monospace)
-            .or_default()
-            .push(name.to_string());
     }
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .extend(["DejaVuSans".to_string(), "NotoSansSymbols2".to_string()]);
 
     ctx.set_fonts(fonts);
 }

@@ -73,10 +73,11 @@ pub struct Storage {
 impl Storage {
     pub fn new_in_memory() -> Result<Self> {
         let manager = SqliteConnectionManager::memory().with_init(|c| {
-            let _ = c.pragma_update(None, "journal_mode", "WAL");
             let _ = c.pragma_update(None, "synchronous", "NORMAL");
             let _ = c.pragma_update(None, "foreign_keys", "ON");
-            let _ = c.pragma_update(None, "busy_timeout", "5000");
+            let _ = c.pragma_update(None, "busy_timeout", "10000");
+            let _ = c.pragma_update(None, "cache_size", "-1000");
+            let _ = c.pragma_update(None, "temp_store", "MEMORY");
             Ok(())
         });
         let pool = Pool::new(manager)
@@ -91,14 +92,16 @@ impl Storage {
             let _ = std::fs::create_dir_all(parent);
         }
         let manager = SqliteConnectionManager::file(path.as_ref()).with_init(|c| {
-            let _ = c.pragma_update(None, "journal_mode", "WAL");
             let _ = c.pragma_update(None, "synchronous", "NORMAL");
             let _ = c.pragma_update(None, "foreign_keys", "ON");
-            let _ = c.pragma_update(None, "busy_timeout", "5000");
+            let _ = c.pragma_update(None, "busy_timeout", "10000");
+            let _ = c.pragma_update(None, "cache_size", "-1000");
+            let _ = c.pragma_update(None, "temp_store", "MEMORY");
+            let _ = c.pragma_update(None, "mmap_size", "67108864");
             Ok(())
         });
         let pool = Pool::builder()
-            .max_size(16)
+            .max_size(6)
             .build(manager)
             .map_err(|e| EmailError::Database(format!("Failed to create DB pool: {}", e)))?;
         let storage = Self { pool };
@@ -114,7 +117,7 @@ impl Storage {
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         let _ = conn.pragma_update(None, "foreign_keys", "ON");
-        let _ = conn.pragma_update(None, "busy_timeout", "5000");
+        let _ = conn.pragma_update(None, "busy_timeout", "10000");
 
         // 1. Create base tables
         conn.execute_batch(schema::SCHEMA_TABLES)
@@ -123,7 +126,14 @@ impl Storage {
         // 2. Perform safe column migrations on existing tables before index creation
         Self::migrate_columns(&conn)?;
 
-        // 3. Create indexes, triggers, and FTS5 virtual tables
+        // 3. Drop legacy FTS triggers to guarantee migration to fast rowid O(1) triggers
+        let _ = conn.execute_batch(r#"
+            DROP TRIGGER IF EXISTS messages_fts_ad;
+            DROP TRIGGER IF EXISTS messages_fts_au;
+            DROP TRIGGER IF EXISTS messages_fts_ai;
+        "#);
+
+        // 4. Create indexes, triggers, and FTS5 virtual tables
         conn.execute_batch(schema::SCHEMA_INDEXES_AND_FTS)
             .map_err(|e| EmailError::Database(format!("Indexes & FTS init error: {}", e)))?;
 

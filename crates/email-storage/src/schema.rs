@@ -184,11 +184,11 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
-    DELETE FROM messages_fts WHERE message_id = old.id;
+    DELETE FROM messages_fts WHERE rowid = old.rowid;
 END;
 
-CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
-    DELETE FROM messages_fts WHERE message_id = old.id;
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF subject, from_name, from_address, snippet, body_plain, to_recipients_json ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.rowid;
     INSERT INTO messages_fts(
         rowid, message_id, account_id, folder_id, subject,
         from_name, from_address, snippet, body_text, to_recipients
