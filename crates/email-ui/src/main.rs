@@ -1,4 +1,5 @@
 mod app;
+mod fonts;
 mod theme;
 mod tray;
 mod views;
@@ -88,6 +89,9 @@ fn main() -> Result<(), eframe::Error> {
         "AT-mail-rs",
         options,
         Box::new(move |cc| {
+            // Configure multilingual fonts (Devanagari, CJK, etc.)
+            fonts::configure_fonts(&cc.egui_ctx);
+
             // Install GPU-accelerated image loaders (PNG, JPEG, WebP, URI)
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
