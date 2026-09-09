@@ -1098,6 +1098,51 @@ impl SettingsView {
         ui.label(RichText::new("SYSTEM TRAY").size(11.0).strong().color(AppTheme::text_muted(ui)));
         ui.add_space(4.0);
         ui.label("• StatusNotifierItem DBus tray enabled with live unread badge, quick compose, and show/hide window toggle.");
+
+        ui.add_space(14.0);
+        ui.label(RichText::new("AUTO-SYNC INTERVAL").size(11.0).strong().color(AppTheme::text_muted(ui)));
+        ui.add_space(6.0);
+
+        egui::Frame::none()
+            .fill(AppTheme::bg_card(ui))
+            .stroke(Stroke::new(1.0_f32, AppTheme::border_subtle(ui)))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Automatically sync all accounts in the background:").strong().color(AppTheme::text_primary(ui)));
+                ui.add_space(6.0);
+
+                let mut cfg = load_app_config();
+                let prev_interval = cfg.auto_sync_interval_secs;
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
+                    for (label, secs) in [
+                        ("Disabled", 0u64),
+                        ("1 min", 60),
+                        ("5 min", 300),
+                        ("10 min", 600),
+                        ("30 min", 1800),
+                    ] {
+                        if ui.radio_value(&mut cfg.auto_sync_interval_secs, secs, label).changed() {
+                            // will save below
+                        }
+                    }
+                });
+
+                if cfg.auto_sync_interval_secs != prev_interval {
+                    if let Err(e) = save_app_config(&cfg) {
+                        self.status_msg = Some((false, format!("Failed to save auto-sync setting: {}", e)));
+                    } else {
+                        let label = if cfg.auto_sync_interval_secs == 0 {
+                            "Auto-sync disabled.".to_string()
+                        } else {
+                            format!("Auto-sync set to every {} seconds.", cfg.auto_sync_interval_secs)
+                        };
+                        self.status_msg = Some((true, label));
+                    }
+                }
+            });
     }
 
     fn show_backup_tab(

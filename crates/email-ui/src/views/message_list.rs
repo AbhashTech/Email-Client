@@ -23,6 +23,7 @@ impl MessageListView {
         on_batch_move: &mut Option<(Vec<String>, String)>,
         on_batch_toggle_read: &mut Option<(Vec<String>, bool)>,
         on_batch_toggle_flag: &mut Option<(Vec<String>, bool)>,
+        on_mark_all_read: &mut bool,
     ) {
         // Drag-and-drop preview cursor following mouse
         if let Some(payload) = egui::DragAndDrop::payload::<Vec<String>>(ui.ctx()) {
@@ -161,6 +162,20 @@ impl MessageListView {
                         if ui.small_button("☑").on_hover_text("Select all").clicked() {
                             for m in messages {
                                 selected_ids.insert(m.id.clone());
+                            }
+                        }
+                        let has_unread = messages.iter().any(|m| !m.is_read);
+                        if has_unread {
+                            if ui
+                                .small_button(
+                                    egui::RichText::new("✓ All Read")
+                                        .size(10.5)
+                                        .color(AppTheme::ACCENT_SUCCESS),
+                                )
+                                .on_hover_text("Mark all messages in this view as read")
+                                .clicked()
+                            {
+                                *on_mark_all_read = true;
                             }
                         }
                     }

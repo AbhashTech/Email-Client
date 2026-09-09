@@ -58,3 +58,4 @@ sha2 = "0.10"
 aes-gcm = "0.10"
 rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }
+sysinfo = "0.31"

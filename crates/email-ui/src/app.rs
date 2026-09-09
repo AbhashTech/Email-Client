@@ -61,12 +61,23 @@ pub struct EmailApp {
     show_scheduled_modal: bool,
     last_applied_system_theme: Option<egui::Theme>,
 
+    // Bug Fix: graceful quit flag (replaces std::process::exit)
+    should_quit: bool,
+
+    // Enhancement 1: Auto-sync timer
+    last_auto_sync: std::time::Instant,
+
+    // Enhancement 3: Live memory usage cache
+    cached_mem_rss: String,
+    last_mem_refresh: std::time::Instant,
+
     // Sub-views
     account_setup_view: AccountSetupView,
     compose_view: ComposeView,
     settings_view: SettingsView,
     command_palette: CommandPalette,
 }
+
 
 
 impl EmailApp {
@@ -139,11 +150,18 @@ impl EmailApp {
             outbox_count: 0,
             show_scheduled_modal: false,
             last_applied_system_theme: None,
+            should_quit: false,
+            last_auto_sync: std::time::Instant::now(),
+            cached_mem_rss: "–".to_string(),
+            last_mem_refresh: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(10))
+                .unwrap_or_else(std::time::Instant::now),
             account_setup_view: AccountSetupView::new(),
             compose_view: ComposeView::new(),
             settings_view,
             command_palette: CommandPalette::new(),
         };
+
 
 
         app.reload_data();
@@ -328,7 +346,7 @@ impl EmailApp {
                         let _ = self.cmd_tx.send(SyncCommand::SyncAll);
                     }
                     crate::tray::TrayAction::Quit => {
-                        std::process::exit(0);
+                        self.should_quit = true;
                     }
                 }
             }
@@ -341,6 +359,13 @@ impl EmailApp {
                     is_syncing,
                     status_text,
                 } => {
+                    // Enhancement 5: toast on sync completion
+                    if self.is_syncing && !is_syncing {
+                        self.status_toast = Some((
+                            format!("✓ {}", status_text),
+                            std::time::Instant::now(),
+                        ));
+                    }
                     self.is_syncing = is_syncing;
                     self.status_text = status_text;
                 }
@@ -471,7 +496,10 @@ impl EmailApp {
                 }
             }
             crate::CloseButtonAction::QuitApplication => {
-                std::process::exit(0);
+                // Set the graceful quit flag — eframe will call ViewportCommand::Close
+                // from the update() loop, allowing Rust drop chains and Tokio to shut
+                // down cleanly (no "wait or terminate" dialog on Linux compositors).
+                self.should_quit = true;
             }
         }
     }
@@ -505,6 +533,83 @@ impl EmailApp {
                     }
                 }
             }
+        }
+    }
+
+    // Enhancement 1: Auto-sync on configurable timer
+    pub fn check_auto_sync(&mut self) {
+        let cfg = crate::load_app_config();
+        let interval_secs = cfg.auto_sync_interval_secs;
+        if interval_secs == 0 || self.accounts.is_empty() || self.is_syncing {
+            return;
+        }
+        if self.last_auto_sync.elapsed() >= std::time::Duration::from_secs(interval_secs) {
+            self.last_auto_sync = std::time::Instant::now();
+            let _ = self.cmd_tx.send(SyncCommand::SyncAll);
+        }
+    }
+
+    // Enhancement 3: Read process RSS cross-platform (Linux, macOS, Windows) using sysinfo
+    fn read_rss_memory() -> String {
+        use sysinfo::{Pid, ProcessesToUpdate, System};
+        let pid = Pid::from_u32(std::process::id());
+        let mut sys = System::new();
+        sys.refresh_processes(ProcessesToUpdate::Some(&[pid]));
+        if let Some(proc) = sys.process(pid) {
+            let mb = proc.memory() / (1024 * 1024);
+            format!("{} MB", mb)
+        } else {
+            "– MB".to_string()
+        }
+    }
+
+    pub fn refresh_memory_stat(&mut self) {
+        if self.last_mem_refresh.elapsed() >= std::time::Duration::from_secs(5) {
+            self.cached_mem_rss = Self::read_rss_memory();
+            self.last_mem_refresh = std::time::Instant::now();
+        }
+    }
+
+    // Enhancement 4: Mark all messages in current view as read
+    pub fn mark_all_messages_read(&mut self) {
+        let unread_ids: Vec<(String, String, String, u32)> = self
+            .messages
+            .iter()
+            .filter(|m| !m.is_read)
+            .map(|m| (m.id.clone(), m.account_id.clone(), m.folder_id.clone(), m.uid))
+            .collect();
+
+        for (mid, account_id, folder_id, uid) in &unread_ids {
+            let _ = self.storage.set_message_read(mid, true);
+            let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
+                account_id: account_id.clone(),
+                folder_id: folder_id.clone(),
+                uid: *uid,
+                is_read: true,
+            });
+        }
+
+        // Update in-memory message list
+        for m in &mut self.messages {
+            m.is_read = true;
+        }
+
+        // Update folder unread counters
+        for (_, account_id, folder_id, _) in &unread_ids {
+            if let Some(folders) = self.folders_by_account.get_mut(account_id) {
+                if let Some(f) = folders.iter_mut().find(|f| &f.id == folder_id) {
+                    f.unread_messages = f.unread_messages.saturating_sub(1);
+                }
+            }
+        }
+        self.update_tray_unread();
+
+        let count = unread_ids.len();
+        if count > 0 {
+            self.status_toast = Some((
+                format!("✓ Marked {} message(s) as read", count),
+                std::time::Instant::now(),
+            ));
         }
     }
 
@@ -870,9 +975,23 @@ impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_events(ctx);
 
+        // Bug Fix: Graceful quit — let eframe close the window cleanly instead of
+        // calling std::process::exit(), which avoids the "Wait or Terminate" dialog
+        // on Linux compositors (Wayland/X11).
+        if self.should_quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
         if ctx.input(|i| i.viewport().close_requested()) {
             self.handle_close_requested(ctx);
         }
+
+        // Enhancement 1: Periodic auto-sync
+        self.check_auto_sync();
+
+        // Enhancement 3: Refresh live memory stat
+        self.refresh_memory_stat();
 
         if !self.is_window_visible {
             // Render an opaque background so Wayland compositor receives a valid committed frame buffer
@@ -904,7 +1023,67 @@ impl App for EmailApp {
             self.command_palette.open();
         }
 
-        // Top Navigation Bar
+        // Enhancement 2: Global keyboard shortcuts (only when no text field is focused)
+        // These match the shortcuts listed in the Command Palette.
+        if !ctx.wants_keyboard_input() {
+            // c → Compose new email
+            if ctx.input(|i| i.key_pressed(egui::Key::C)) {
+                self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+            }
+            // / → Focus search
+            if ctx.input(|i| i.key_pressed(egui::Key::Slash)) {
+                self.focus_search_requested = true;
+            }
+
+            if self.selected_message_id.is_some() {
+                // r → Reply
+                if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+                    if let Some(ref detail) = self.selected_message_detail {
+                        let quote = detail.body_plain.clone().unwrap_or_default();
+                        self.compose_view.open_reply(
+                            &detail.header.account_id,
+                            &detail.header.from_address,
+                            "",
+                            &detail.header.subject,
+                            detail.header.message_id.clone(),
+                            &quote,
+                            &self.signatures,
+                            true,
+                        );
+                    }
+                }
+                // f → Forward
+                if ctx.input(|i| i.key_pressed(egui::Key::F)) {
+                    if let Some(ref detail) = self.selected_message_detail {
+                        let quote = detail.body_plain.clone().unwrap_or_default();
+                        let subj = format!("Fwd: {}", detail.header.subject);
+                        self.compose_view.open_reply(
+                            &detail.header.account_id,
+                            "",
+                            "",
+                            &subj,
+                            None,
+                            &format!("---------- Forwarded message ---------\nFrom: {}\nSubject: {}\n\n{}", detail.header.from_address, detail.header.subject, quote),
+                            &self.signatures,
+                            true,
+                        );
+                    }
+                }
+                // u → Toggle unread
+                if ctx.input(|i| i.key_pressed(egui::Key::U)) {
+                    self.execute_palette_action(PaletteAction::MarkUnread);
+                }
+                // s → Toggle star/flag
+                if ctx.input(|i| i.key_pressed(egui::Key::S)) {
+                    self.execute_palette_action(PaletteAction::ToggleStar);
+                }
+                // Delete → Delete selected
+                if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
+                    self.execute_palette_action(PaletteAction::DeleteSelected);
+                }
+            }
+        }
+
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -1052,7 +1231,7 @@ impl App for EmailApp {
                         .color(AppTheme::text_muted(ui)),
                 );
                 ui.label(
-                    RichText::new("Memory: ~38 MB (Zero Chromium/Electron)")
+                    RichText::new(format!("Memory: {} (Zero Chromium/Electron)", self.cached_mem_rss))
                         .size(11.0)
                         .color(AppTheme::text_secondary(ui)),
                 );
@@ -1149,6 +1328,7 @@ impl App for EmailApp {
         let mut on_batch_move = None;
         let mut on_batch_toggle_read = None;
         let mut on_batch_toggle_flag = None;
+        let mut on_mark_all_read = false;
 
         let available_folders: Vec<Folder> = self.folders_by_account.values().flatten().cloned().collect();
 
@@ -1174,12 +1354,18 @@ impl App for EmailApp {
                         &mut on_batch_move,
                         &mut on_batch_toggle_read,
                         &mut on_batch_toggle_flag,
+                        &mut on_mark_all_read,
                     );
                 });
         }
 
         if prev_search != self.search_query {
             self.reload_messages();
+        }
+
+        // Enhancement 4: Mark all as read handler
+        if on_mark_all_read {
+            self.mark_all_messages_read();
         }
 
         if let Some(ids_to_delete) = on_batch_delete {

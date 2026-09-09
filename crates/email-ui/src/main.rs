@@ -126,6 +126,13 @@ pub struct AppConfig {
     pub active_theme: Option<String>,
     #[serde(default)]
     pub close_action: CloseButtonAction,
+    /// Auto-sync interval in seconds. 0 = disabled. Default = 300 (5 minutes).
+    #[serde(default = "default_auto_sync_interval")]
+    pub auto_sync_interval_secs: u64,
+}
+
+fn default_auto_sync_interval() -> u64 {
+    300
 }
 
 pub fn load_app_config() -> AppConfig {

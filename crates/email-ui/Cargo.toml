@@ -28,5 +28,6 @@ base64 = { workspace = true }
 html-escape = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sysinfo = { workspace = true }
 wry = "0.56.1"
 tao = "0.37.0"
