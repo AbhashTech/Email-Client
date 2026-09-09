@@ -67,9 +67,9 @@ AT-mail-rs provides first-class, Vim-inspired keyboard navigation and an omnipre
 ## ✨ Key Features
 
 ### ⚡ Performance & Core Architecture
-- **Ultra-Low Memory Footprint**: Built in **pure Rust** with GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead. Startup time < 100ms; idle resident memory footprint < 45 MB.
+- **Ultra-Low Memory Footprint & Real-Time Monitoring**: Built in **pure Rust** with GPU-accelerated **`egui`** (`eframe`) — zero Electron, zero Chromium runtime overhead. Startup time < 100ms; idle resident memory footprint < 45 MB with **live cross-platform RSS memory tracking** (`sysinfo`) displayed in the status bar.
 - **Embedded SQLite WAL Engine**: Full MIME messages, HTML bodies, and plain-text alternatives are indexed and cached locally with Write-Ahead Logging (WAL) for 0ms latency when opening emails.
-- **Async IMAP/SMTP Pipeline**: Full RFC 2047 envelope parsing (`mailparse`), configurable date-window syncing (7d, 14d, 30d, 45d, 60d, 90d, 1y, Custom Days, All Time), and safe connection pooling.
+- **Async IMAP/SMTP Pipeline & Background Auto-Sync**: Full RFC 2047 envelope parsing (`mailparse`), configurable periodic auto-sync timer (Disabled, 1m, 5m, 10m, 30m), configurable date-window syncing (7d, 14d, 30d, 45d, 60d, 90d, 1y, Custom Days, All Time), IMAP IDLE real-time push, and safe connection pooling.
 - **OS-Native Keyring Integration**: Secure credential storage via Linux Secret Service, macOS Keychain, and Windows Credential Manager (`keyring-rs`). Passwords are never stored in plaintext.
 
 ---
@@ -168,12 +168,13 @@ Switch between handcrafted visual themes via `⚙ Preferences -> 🎨 Appearance
 
 ### 🪟 Window Controls, Wayland/Hyprland & System Tray Integration
 - **Crisp Titlebar Controls**: Font-safe Minimize (`[−]`), Maximize/Restore (`[◻ / ⧉]`), and Close (`[×]`) buttons built directly into the top navigation bar.
-- **Wayland / Tiling WM Support**: Fully compatible with Wayland compositors (Hyprland, Sway, GNOME, KDE) with opaque frame buffers and clean surface teardown on exit.
+- **Wayland / Tiling WM & Graceful Teardown**: Fully compatible with Wayland compositors (Hyprland, Sway, GNOME, KDE) with opaque frame buffers and clean `eframe` graceful viewport close — eliminating application exit hangs and compositor "wait or terminate" dialogs.
 - **System Tray (StatusNotifierItem DBus)**:
   - Click tray icon to toggle application visibility.
   - Context menu actions: `Show/Hide Window`, `✉ Compose Email`, `🔄 Sync All Mail`, and `Quit`.
 - **Customizable Close Action (`Settings -> General & Storage`)**: Choose between *Quit Application Completely* (recommended for Wayland & Tiling WMs) and *Minimize to System Tray* to keep background sync running.
 - **Zero GUI Thread Blocking**: Queue counters and background checks are cached and throttled to eliminate SQLite lock contention and ensure 60+ FPS responsiveness.
+- **Interactive Visual Toast Notifications**: Real-time toast popups in the lower right corner upon sync completion, outbox retry dispatches, and snoozed mail arrival.
 
 ---
 
@@ -212,6 +213,7 @@ Select how many days of emails to synchronize during account setup or in setting
 ### 📦 Multi-Select, Batch Actions & Drag-and-Drop
 - **Multi-Select**: Select emails using row checkboxes `[✓]`, `Ctrl / Cmd + Click`, or `Shift + Click` range selection.
 - **Batch Actions Bar**: Perform bulk operations across selected items: Batch Delete (`🗑 Delete`), Batch Move (`📁 Move ▾`), Batch Mark Read/Unread (`✉ Read` / `✉ Unread`), and Batch Star (`★ Star`).
+- **Mark All as Read**: Single-click `[✓ All Read]` toolbar button in the search header to instantly clear unread counts across all messages in the active folder view.
 - **Drag-and-Drop**: Drag individual or batch-selected emails directly onto sidebar folders with live mouse payload count badges (`📁 Moving N emails...`).
 
 ---
