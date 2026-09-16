@@ -427,6 +427,19 @@ impl EmailApp {
                 }
                 SyncEvent::NewMailNotification { from, subject, .. } => {
                     self.status_text = format!("New mail from {}: {}", from, subject);
+                    
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = notify_rust::Notification::new()
+                            .summary(&format!("📬 New Mail from {}", from))
+                            .body(&subject)
+                            .icon("mail-unread")
+                            .timeout(notify_rust::Timeout::Milliseconds(5000))
+                            .show();
+                    }
+                    
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+
                     self.reload_data();
                 }
             }
