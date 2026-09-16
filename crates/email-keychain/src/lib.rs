@@ -79,28 +79,30 @@ impl CredentialStore for NativeKeyringStore {
     }
 
     fn get_credential(&self, key: &str) -> Result<String> {
+        // 1. Check in-memory cache first to avoid blocking D-Bus RPCs to OS keyring daemon
+        if let Ok(cache) = self.fallback_cache.read() {
+            if let Some(secret) = cache.get(key) {
+                return Ok(secret.clone());
+            }
+        }
+
+        // 2. Query OS Native Keyring
         match Entry::new(&self.service_name, key) {
             Ok(entry) => match entry.get_password() {
-                Ok(secret) => Ok(secret),
-                Err(keyring::Error::NoEntry) => {
-                    // Check fallback cache
-                    if let Ok(cache) = self.fallback_cache.read() {
-                        if let Some(secret) = cache.get(key) {
-                            return Ok(secret.clone());
-                        }
+                Ok(secret) => {
+                    // Populate memory cache for future instant lookups
+                    if let Ok(mut cache) = self.fallback_cache.write() {
+                        cache.insert(key.to_string(), secret.clone());
                     }
+                    Ok(secret)
+                }
+                Err(keyring::Error::NoEntry) => {
                     Err(EmailError::Keyring(format!(
                         "No credential found for key: {}",
                         key
                     )))
                 }
                 Err(e) => {
-                    // Try fallback
-                    if let Ok(cache) = self.fallback_cache.read() {
-                        if let Some(secret) = cache.get(key) {
-                            return Ok(secret.clone());
-                        }
-                    }
                     Err(EmailError::Keyring(format!(
                         "Keyring lookup error for {}: {}",
                         key, e
@@ -108,11 +110,6 @@ impl CredentialStore for NativeKeyringStore {
                 }
             },
             Err(e) => {
-                if let Ok(cache) = self.fallback_cache.read() {
-                    if let Some(secret) = cache.get(key) {
-                        return Ok(secret.clone());
-                    }
-                }
                 Err(EmailError::Keyring(format!("Keyring init error: {}", e)))
             }
         }
@@ -180,5 +177,30 @@ impl CredentialStore for MockKeyringStore {
 
     fn is_available(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mock_keyring_store_crud() {
+        let store = MockKeyringStore::new();
+        assert!(store.set_credential("user1", "pass123").is_ok());
+        assert_eq!(store.get_credential("user1").unwrap(), "pass123");
+        assert!(store.delete_credential("user1").is_ok());
+        assert!(store.get_credential("user1").is_err());
+    }
+
+    #[test]
+    fn test_native_keyring_store_cache_fallback() {
+        let store = NativeKeyringStore::with_service("com.test.testservice");
+        // Pre-populate cache directly
+        if let Ok(mut cache) = store.fallback_cache.write() {
+            cache.insert("cached_acc".to_string(), "cached_pass".to_string());
+        }
+        // get_credential should return cached password immediately
+        assert_eq!(store.get_credential("cached_acc").unwrap(), "cached_pass");
     }
 }

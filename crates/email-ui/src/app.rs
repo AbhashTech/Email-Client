@@ -432,12 +432,16 @@ impl EmailApp {
                     
                     #[cfg(target_os = "linux")]
                     {
-                        let _ = notify_rust::Notification::new()
-                            .summary(&format!("📬 New Mail from {}", from))
-                            .body(&subject)
-                            .icon("mail-unread")
-                            .timeout(notify_rust::Timeout::Milliseconds(5000))
-                            .show();
+                        let from_clone = from.clone();
+                        let subject_clone = subject.clone();
+                        std::thread::spawn(move || {
+                            let _ = notify_rust::Notification::new()
+                                .summary(&format!("📬 New Mail from {}", from_clone))
+                                .body(&subject_clone)
+                                .icon("mail-unread")
+                                .timeout(notify_rust::Timeout::Milliseconds(5000))
+                                .show();
+                        });
                     }
                     
                     ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
@@ -1969,6 +1973,7 @@ impl App for EmailApp {
         }
 
         // Move to Folder Modal
+        let mut modal_move_action: Option<(String, String, String, String, u32, String)> = None;
         if self.show_move_modal {
             let mut modal_open = self.show_move_modal;
             egui::Window::new("📂 Move to Folder")
@@ -1981,14 +1986,14 @@ impl App for EmailApp {
                             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                                 for folder in folders {
                                     if ui.selectable_label(false, &folder.display_name).clicked() {
-                                        let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
-                                            account_id: account_id.clone(),
-                                            source_folder_id: detail.header.folder_id.clone(),
-                                            target_folder_id: folder.id.clone(),
-                                            message_id: detail.header.message_id.clone().unwrap_or_default(),
-                                            uid: detail.header.uid,
-                                        });
-                                        self.show_move_modal = false;
+                                        modal_move_action = Some((
+                                            detail.header.id.clone(),
+                                            account_id.clone(),
+                                            detail.header.folder_id.clone(),
+                                            folder.id.clone(),
+                                            detail.header.uid,
+                                            folder.display_name.clone(),
+                                        ));
                                         break;
                                     }
                                 }
@@ -2001,6 +2006,25 @@ impl App for EmailApp {
                     }
                 });
             self.show_move_modal = modal_open;
+        }
+
+        if let Some((msg_id, account_id, source_folder_id, target_folder_id, uid, target_folder_name)) = modal_move_action {
+            let _ = self.storage.move_message_to_folder(&msg_id, &target_folder_id);
+            let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
+                account_id,
+                source_folder_id,
+                target_folder_id,
+                message_id: msg_id,
+                uid,
+            });
+            self.selected_message_id = None;
+            self.selected_message_detail = None;
+            self.selected_thread_messages.clear();
+            self.reload_data();
+            let toast = format!("Moved email to {}", target_folder_name);
+            self.status_text = toast.clone();
+            self.status_toast = Some((toast, std::time::Instant::now()));
+            self.show_move_modal = false;
         }
 
         let mut on_add_account_from_settings = false;
