@@ -201,6 +201,33 @@ impl SyncWorker {
 
                 let _ = session.logout().await;
 
+                // Apply filter rules to newly synced messages
+                if let Ok(rules) = storage.get_filter_rules() {
+                    let enabled_rules: Vec<_> = rules.into_iter().filter(|r| r.is_enabled).collect();
+                    if !enabled_rules.is_empty() {
+                        if let Ok(recent_msgs) = storage.get_messages(Some(&account.id), None, 50, 0, None) {
+                            for msg in &recent_msgs {
+                                for rule in &enabled_rules {
+                                    if rule.matches(msg) {
+                                        if rule.action_mark_read && !msg.is_read {
+                                            let _ = storage.set_message_read(&msg.id, true);
+                                        }
+                                        if rule.action_star && !msg.is_flagged {
+                                            let _ = storage.set_message_flagged(&msg.id, true);
+                                        }
+                                        if rule.action_delete {
+                                            let _ = storage.delete_message(&msg.id);
+                                        }
+                                        if let Some(target) = &rule.action_move_to_folder_id {
+                                            let _ = storage.move_message_to_folder(&msg.id, target);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let _ = event_tx.send(SyncEvent::SyncStatusChanged {
                     is_syncing: false,
                     status_text: format!("Sync finished for {}", account.email),

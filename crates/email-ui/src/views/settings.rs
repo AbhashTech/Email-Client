@@ -6,7 +6,7 @@ use crate::theme::{
 use egui::{Color32, RichText, Rounding, ScrollArea, Stroke, Ui, Vec2, Window};
 use email_core::events::SyncCommand;
 use email_core::models::{
-    Account, AccountBackup, AppBackup, CustomTheme, Folder, SettingsMetadata, Signature, Template,
+    Account, AccountBackup, AppBackup, CustomTheme, Folder, SettingsMetadata, Signature, Template, FilterRule,
 };
 use email_keychain::CredentialStore;
 use email_storage::Storage;
@@ -22,6 +22,7 @@ pub enum SettingsTab {
     Appearance,
     SecurityPgp,
     General,
+    Filters,
     Keybindings,
     Backup,
 }
@@ -70,6 +71,12 @@ pub struct SettingsView {
 
     // Feedback message
     pub status_msg: Option<(bool, String)>,
+
+    // Filter Rules
+    pub filter_rules: Vec<FilterRule>,
+    pub filter_rules_loaded: bool,
+    pub new_rule_draft: Option<FilterRule>,
+    pub show_rule_editor: bool,
 }
 
 impl SettingsView {
@@ -108,6 +115,10 @@ impl SettingsView {
             pgp_import_email: String::new(),
             pgp_import_armored_key: String::new(),
             status_msg: None,
+            filter_rules: Vec::new(),
+            filter_rules_loaded: false,
+            new_rule_draft: None,
+            show_rule_editor: false,
         }
     }
 
@@ -178,6 +189,7 @@ impl SettingsView {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Appearance, "🎨 Appearance");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::SecurityPgp, "🔒 Security (PGP)");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Filters, "🔽 Filters");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Keybindings, "⌨ Keybindings");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Backup, "💾 Backup & Restore");
                 });
@@ -229,6 +241,9 @@ impl SettingsView {
                         }
                         SettingsTab::General => {
                             self.show_general_tab(ui, accounts, storage);
+                        }
+                        SettingsTab::Filters => {
+                            self.show_filters_tab(ui, storage, on_data_changed);
                         }
                         SettingsTab::Keybindings => {
                             self.show_keybindings_tab(ui);
@@ -1177,6 +1192,92 @@ impl SettingsView {
                 }
             });
     }
+    fn show_filters_tab(&mut self, ui: &mut Ui, storage: &Storage, on_data_changed: &mut bool) {
+        if !self.filter_rules_loaded {
+            if let Ok(rules) = storage.get_filter_rules() {
+                self.filter_rules = rules;
+            }
+            self.filter_rules_loaded = true;
+        }
+
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new("Email Filter Rules").size(16.0).color(AppTheme::text_primary(ui)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("➕ Create Rule").clicked() {
+                    self.show_rule_editor = true;
+                    self.new_rule_draft = Some(FilterRule::new("New Rule".to_string()));
+                }
+            });
+        });
+        ui.add_space(10.0);
+
+        if self.filter_rules.is_empty() && !self.show_rule_editor {
+            ui.label("No filter rules defined.");
+        } else {
+            for rule in &mut self.filter_rules {
+                ui.horizontal(|ui| {
+                    let mut enabled = rule.is_enabled;
+                    if ui.checkbox(&mut enabled, &rule.name).changed() {
+                        rule.is_enabled = enabled;
+                        let _ = storage.save_filter_rule(rule);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("🗑").clicked() {
+                            let _ = storage.delete_filter_rule(&rule.id);
+                            *on_data_changed = true; // To trigger reload in next frame
+                        }
+                    });
+                });
+            }
+        }
+        
+        if *on_data_changed {
+            self.filter_rules_loaded = false;
+        }
+
+        if self.show_rule_editor {
+            let mut close_editor = false;
+            if let Some(draft) = &mut self.new_rule_draft {
+                egui::Window::new("Create Filter Rule").open(&mut self.show_rule_editor).show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| { ui.label("Name:"); ui.text_edit_singleline(&mut draft.name); });
+                    
+                    let mut from_c = draft.from_contains.clone().unwrap_or_default();
+                    if ui.horizontal(|ui| { ui.label("From contains:"); ui.text_edit_singleline(&mut from_c).changed() }).inner {
+                        draft.from_contains = if from_c.is_empty() { None } else { Some(from_c) };
+                    }
+                    
+                    let mut to_c = draft.to_contains.clone().unwrap_or_default();
+                    if ui.horizontal(|ui| { ui.label("To contains:"); ui.text_edit_singleline(&mut to_c).changed() }).inner {
+                        draft.to_contains = if to_c.is_empty() { None } else { Some(to_c) };
+                    }
+                    
+                    let mut sub_c = draft.subject_contains.clone().unwrap_or_default();
+                    if ui.horizontal(|ui| { ui.label("Subject contains:"); ui.text_edit_singleline(&mut sub_c).changed() }).inner {
+                        draft.subject_contains = if sub_c.is_empty() { None } else { Some(sub_c) };
+                    }
+                    
+                    ui.checkbox(&mut draft.action_mark_read, "Mark as Read");
+                    ui.checkbox(&mut draft.action_star, "Star Message");
+                    ui.checkbox(&mut draft.action_delete, "Delete Message");
+                    
+                    let mut move_f = draft.action_move_to_folder_id.clone().unwrap_or_default();
+                    if ui.horizontal(|ui| { ui.label("Move to folder ID:"); ui.text_edit_singleline(&mut move_f).changed() }).inner {
+                        draft.action_move_to_folder_id = if move_f.is_empty() { None } else { Some(move_f) };
+                    }
+                    
+                    if ui.button("Save Rule").clicked() {
+                        let _ = storage.save_filter_rule(draft);
+                        self.filter_rules_loaded = false;
+                        close_editor = true;
+                    }
+                });
+            }
+            if close_editor {
+                self.show_rule_editor = false;
+            }
+        }
+    }
+
     fn show_keybindings_tab(&mut self, ui: &mut Ui) {
         ui.heading(RichText::new("Keyboard Shortcuts").size(16.0).color(AppTheme::text_primary(ui)));
         ui.add_space(10.0);

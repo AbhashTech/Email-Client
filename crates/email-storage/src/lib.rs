@@ -1984,6 +1984,52 @@ impl Storage {
             Ok(None)
         }
     }
+
+    pub fn get_filter_rules(&self) -> Result<Vec<email_core::models::FilterRule>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT id, name, is_enabled, from_contains, to_contains, subject_contains, action_mark_read, action_star, action_move_to_folder_id, action_delete, created_at FROM filter_rules ORDER BY created_at ASC")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        let rules = stmt.query_map([], |row| {
+            Ok(email_core::models::FilterRule {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                is_enabled: row.get::<_, i64>(2)? != 0,
+                from_contains: row.get(3)?,
+                to_contains: row.get(4)?,
+                subject_contains: row.get(5)?,
+                action_mark_read: row.get::<_, i64>(6)? != 0,
+                action_star: row.get::<_, i64>(7)? != 0,
+                action_move_to_folder_id: row.get(8)?,
+                action_delete: row.get::<_, i64>(9)? != 0,
+                created_at: row.get(10)?,
+            })
+        }).map_err(|e| EmailError::Database(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(rules)
+    }
+
+    pub fn save_filter_rule(&self, rule: &email_core::models::FilterRule) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO filter_rules (id, name, is_enabled, from_contains, to_contains, subject_contains, action_mark_read, action_star, action_move_to_folder_id, action_delete, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            rusqlite::params![
+                rule.id, rule.name, rule.is_enabled as i64,
+                rule.from_contains, rule.to_contains, rule.subject_contains,
+                rule.action_mark_read as i64, rule.action_star as i64,
+                rule.action_move_to_folder_id, rule.action_delete as i64,
+                rule.created_at,
+            ],
+        ).map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn delete_filter_rule(&self, id: &str) -> Result<()> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        conn.execute("DELETE FROM filter_rules WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

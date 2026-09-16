@@ -551,6 +551,62 @@ impl OutboxItem {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterRule {
+    pub id: String,
+    pub name: String,
+    pub is_enabled: bool,
+    pub from_contains: Option<String>,
+    pub to_contains: Option<String>,
+    pub subject_contains: Option<String>,
+    pub action_mark_read: bool,
+    pub action_star: bool,
+    pub action_move_to_folder_id: Option<String>,
+    pub action_delete: bool,
+    pub created_at: i64,
+}
+
+impl FilterRule {
+    pub fn new(name: String) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            is_enabled: true,
+            from_contains: None,
+            to_contains: None,
+            subject_contains: None,
+            action_mark_read: false,
+            action_star: false,
+            action_move_to_folder_id: None,
+            action_delete: false,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    pub fn matches(&self, header: &MessageHeader) -> bool {
+        if let Some(ref pat) = self.from_contains {
+            if !header.from_address.to_lowercase().contains(&pat.to_lowercase())
+                && header.from_name.as_deref().map(|n| n.to_lowercase().contains(&pat.to_lowercase())).unwrap_or(false) == false
+            {
+                return false;
+            }
+        }
+        if let Some(ref pat) = self.to_contains {
+            let matched = header.to_recipients.iter().any(|r| {
+                r.email.to_lowercase().contains(&pat.to_lowercase())
+                    || r.name.as_deref().map(|n| n.to_lowercase().contains(&pat.to_lowercase())).unwrap_or(false)
+            });
+            if !matched { return false; }
+        }
+        if let Some(ref pat) = self.subject_contains {
+            if !header.subject.to_lowercase().contains(&pat.to_lowercase()) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

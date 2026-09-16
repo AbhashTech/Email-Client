@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS signatures (
     created_at INTEGER NOT NULL
 );
 
+-- Filter Rules
+CREATE TABLE IF NOT EXISTS filter_rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    from_contains TEXT,
+    to_contains TEXT,
+    subject_contains TEXT,
+    action_mark_read INTEGER NOT NULL DEFAULT 0,
+    action_star INTEGER NOT NULL DEFAULT 0,
+    action_move_to_folder_id TEXT,
+    action_delete INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
 -- Local Drafts
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY,
