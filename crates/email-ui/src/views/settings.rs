@@ -383,7 +383,7 @@ impl SettingsView {
                         
                         ui.add_space(12.0);
                         let mut current_interval = acc.sync_interval_secs;
-                        egui::ComboBox::from_id_source(format!("sync_interval_{}", acc.id))
+                        egui::ComboBox::from_id_salt(format!("sync_interval_{}", acc.id))
                             .selected_text(match current_interval {
                                 None => "Use Global",
                                 Some(0) => "Disabled",
