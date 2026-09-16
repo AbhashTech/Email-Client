@@ -443,9 +443,6 @@ impl EmailApp {
                                 .show();
                         });
                     }
-                    
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
-
                     self.reload_data();
                 }
             }
@@ -2237,9 +2234,12 @@ impl App for EmailApp {
             }
         }
 
-        // Continuous redraw when syncing
+        // Continuous redraw when syncing or periodic heartbeat to guarantee Wayland compositor
+        // ping/pong responses and prevent window manager ANR timeouts
         if self.is_syncing {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
     }
 }

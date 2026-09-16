@@ -82,6 +82,7 @@ fn main() -> Result<(), eframe::Error> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("AT-mail-rs")
+            .with_app_id("AT-mail-rs")
             .with_inner_size([1200.0, 780.0])
             .with_min_inner_size([880.0, 540.0])
             .with_transparent(false),
@@ -179,14 +180,33 @@ fn default_auto_sync_interval() -> u64 {
     300
 }
 
+fn get_config_cache() -> &'static std::sync::Mutex<Option<(AppConfig, std::time::Instant)>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(AppConfig, std::time::Instant)>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
 pub fn load_app_config() -> AppConfig {
-    let config_path = crate::theme::get_config_dir().join("config.json");
-    if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if let Ok(cfg) = serde_json::from_str::<AppConfig>(&content) {
-            return cfg;
+    let cache_mutex = get_config_cache();
+    if let Ok(guard) = cache_mutex.lock() {
+        if let Some((ref cfg, instant)) = *guard {
+            if instant.elapsed() < std::time::Duration::from_secs(2) {
+                return cfg.clone();
+            }
         }
     }
-    AppConfig::default()
+
+    let config_path = crate::theme::get_config_dir().join("config.json");
+    let cfg = if let Ok(content) = std::fs::read_to_string(&config_path) {
+        serde_json::from_str::<AppConfig>(&content).unwrap_or_default()
+    } else {
+        AppConfig::default()
+    };
+
+    if let Ok(mut guard) = cache_mutex.lock() {
+        *guard = Some((cfg.clone(), std::time::Instant::now()));
+    }
+
+    cfg
 }
 
 pub fn save_app_config(cfg: &AppConfig) -> Result<(), String> {
@@ -197,6 +217,11 @@ pub fn save_app_config(cfg: &AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&config_path, json)
         .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    if let Ok(mut guard) = get_config_cache().lock() {
+        *guard = Some((cfg.clone(), std::time::Instant::now()));
+    }
+
     Ok(())
 }
 
