@@ -140,7 +140,7 @@ impl EmailApp {
             AppTheme::apply_preset(&cc.egui_ctx, current_theme);
         }
 
-        let tray = AppTray::new(cmd_tx.clone(), rt_handle.clone());
+        let tray = AppTray::new(cmd_tx.clone(), rt_handle.clone(), cc.egui_ctx.clone());
         let (async_load_tx, async_load_rx) = std::sync::mpsc::channel();
 
         let mut settings_view = SettingsView::new();
@@ -186,7 +186,7 @@ impl EmailApp {
             show_move_modal: false,
             last_applied_system_theme: None,
             should_quit: false,
-            shutdown,
+            shutdown: shutdown.clone(),
             last_auto_sync: std::time::Instant::now(),
             cached_mem_rss: "–".to_string(),
             last_mem_refresh: std::time::Instant::now()
@@ -209,6 +209,32 @@ impl EmailApp {
             // Auto-sync on startup
             let _ = app.cmd_tx.send(SyncCommand::SyncAll);
         }
+
+        // Wakes the reactive egui event loop whenever background sync events occur
+        let mut bcast_rx = app.event_rx.resubscribe();
+        let egui_ctx_events = cc.egui_ctx.clone();
+        app.rt_handle.spawn(async move {
+            while let Ok(_) = bcast_rx.recv().await {
+                egui_ctx_events.request_repaint();
+            }
+        });
+
+        // Gentle 5s tick for queue processing and auto-sync checks (replaces continuous frame polling)
+        let egui_ctx_timer = cc.egui_ctx.clone();
+        let shutdown_timer = shutdown.clone();
+        app.rt_handle.spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        egui_ctx_timer.request_repaint();
+                    }
+                    _ = shutdown_timer.cancelled() => {
+                        break;
+                    }
+                }
+            }
+        });
 
         app
     }
@@ -1186,7 +1212,6 @@ impl App for EmailApp {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(AppTheme::bg_app_ctx(ctx)))
                 .show(ctx, |_ui| {});
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
             return;
         }
 
@@ -2478,12 +2503,9 @@ impl App for EmailApp {
             }
         }
 
-        // Continuous redraw when syncing or periodic heartbeat to guarantee Wayland compositor
-        // ping/pong responses and prevent window manager ANR timeouts
+        // Gentle spinner tick only during active background synchronization
         if self.is_syncing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
-        } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+            ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
     }
 }

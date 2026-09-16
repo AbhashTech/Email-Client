@@ -21,6 +21,7 @@ pub struct EmailTray {
     pub is_visible: Arc<AtomicBool>,
     pub cmd_tx: mpsc::UnboundedSender<SyncCommand>,
     pub action_tx: mpsc::UnboundedSender<TrayAction>,
+    pub egui_ctx: egui::Context,
 }
 
 impl Tray for EmailTray {
@@ -43,6 +44,7 @@ impl Tray for EmailTray {
 
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.action_tx.send(TrayAction::ToggleVisibility);
+        self.egui_ctx.request_repaint();
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -50,6 +52,10 @@ impl Tray for EmailTray {
         let action_tx_toggle = self.action_tx.clone();
         let action_tx_compose = self.action_tx.clone();
         let action_tx_quit = self.action_tx.clone();
+        let egui_ctx_toggle = self.egui_ctx.clone();
+        let egui_ctx_compose = self.egui_ctx.clone();
+        let egui_ctx_sync = self.egui_ctx.clone();
+        let egui_ctx_quit = self.egui_ctx.clone();
         let is_visible = self.is_visible.load(Ordering::Relaxed);
 
         let toggle_label = if is_visible {
@@ -63,6 +69,7 @@ impl Tray for EmailTray {
                 label: toggle_label.into(),
                 activate: Box::new(move |_| {
                     let _ = action_tx_toggle.send(TrayAction::ToggleVisibility);
+                    egui_ctx_toggle.request_repaint();
                 }),
                 ..Default::default()
             }
@@ -71,6 +78,7 @@ impl Tray for EmailTray {
                 label: "✉ Compose Email".into(),
                 activate: Box::new(move |_| {
                     let _ = action_tx_compose.send(TrayAction::ComposeEmail);
+                    egui_ctx_compose.request_repaint();
                 }),
                 ..Default::default()
             }
@@ -80,6 +88,7 @@ impl Tray for EmailTray {
                 label: "🔄 Sync All Mail".into(),
                 activate: Box::new(move |_| {
                     let _ = cmd_tx_sync.send(SyncCommand::SyncAll);
+                    egui_ctx_sync.request_repaint();
                 }),
                 ..Default::default()
             }
@@ -89,6 +98,7 @@ impl Tray for EmailTray {
                 label: "Quit AT-mail-rs".into(),
                 activate: Box::new(move |_| {
                     let _ = action_tx_quit.send(TrayAction::Quit);
+                    egui_ctx_quit.request_repaint();
                 }),
                 ..Default::default()
             }
@@ -106,7 +116,11 @@ pub struct AppTray {
 }
 
 impl AppTray {
-    pub fn new(cmd_tx: mpsc::UnboundedSender<SyncCommand>, rt_handle: tokio::runtime::Handle) -> Self {
+    pub fn new(
+        cmd_tx: mpsc::UnboundedSender<SyncCommand>,
+        rt_handle: tokio::runtime::Handle,
+        egui_ctx: egui::Context,
+    ) -> Self {
         let unread_counter = Arc::new(AtomicU32::new(0));
         let is_visible = Arc::new(AtomicBool::new(true));
         let (action_tx, action_rx) = mpsc::unbounded_channel::<TrayAction>();
@@ -116,6 +130,7 @@ impl AppTray {
             is_visible: is_visible.clone(),
             cmd_tx,
             action_tx,
+            egui_ctx,
         };
 
         let handle_store = Arc::new(std::sync::RwLock::new(None));
