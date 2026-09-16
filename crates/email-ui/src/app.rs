@@ -2499,13 +2499,9 @@ impl App for EmailApp {
                     egui::FontId::proportional(12.0),
                     AppTheme::text_primary_ctx(ctx),
                 );
-                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                let remaining = std::time::Duration::from_secs(6).saturating_sub(instant.elapsed());
+                ctx.request_repaint_after(remaining);
             }
-        }
-
-        // Gentle spinner tick only during active background synchronization
-        if self.is_syncing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
     }
 }
