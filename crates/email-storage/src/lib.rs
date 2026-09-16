@@ -14,6 +14,7 @@ pub struct ParsedSearchQuery {
     pub from: Vec<String>,
     pub to: Vec<String>,
     pub subject: Vec<String>,
+    pub body: Vec<String>,
     pub is_unread: Option<bool>,
     pub is_flagged: Option<bool>,
     pub has_attachment: bool,
@@ -36,6 +37,10 @@ pub fn parse_search_query(raw: &str) -> ParsedSearchQuery {
         } else if let Some(rest) = token.strip_prefix("subject:") {
             if !rest.is_empty() {
                 parsed.subject.push(rest.to_lowercase());
+            }
+        } else if let Some(rest) = token.strip_prefix("body:") {
+            if !rest.is_empty() {
+                parsed.body.push(rest.to_lowercase());
             }
         } else if token.eq_ignore_ascii_case("is:unread") {
             parsed.is_unread = Some(true);
@@ -741,6 +746,13 @@ impl Storage {
             let tok = sanitize_fts5_token(s);
             if !tok.is_empty() {
                 fts_clauses.push(format!("subject: {tok}"));
+            }
+        }
+
+        for b in &parsed.body {
+            let tok = sanitize_fts5_token(b);
+            if !tok.is_empty() {
+                fts_clauses.push(format!("body_text: {tok}"));
             }
         }
 
