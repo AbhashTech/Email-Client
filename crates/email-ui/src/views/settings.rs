@@ -360,6 +360,34 @@ impl SettingsView {
                         ui.label(RichText::new(format!("IMAP: {}:{} • SMTP: {}:{}", acc.imap_host, acc.imap_port, acc.smtp_host, acc.smtp_port)).size(11.5).color(AppTheme::text_secondary(ui)));
                         ui.add_space(12.0);
                         ui.label(RichText::new(format!("Sync Window: {}", acc.sync_days_window.label())).size(11.5).color(AppTheme::accent_hover(ui)));
+                        
+                        ui.add_space(12.0);
+                        let mut current_interval = acc.sync_interval_secs;
+                        egui::ComboBox::from_id_source(format!("sync_interval_{}", acc.id))
+                            .selected_text(match current_interval {
+                                None => "Use Global",
+                                Some(0) => "Disabled",
+                                Some(60) => "1 min",
+                                Some(300) => "5 min",
+                                Some(600) => "10 min",
+                                Some(1800) => "30 min",
+                                Some(v) => "Custom",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut current_interval, None, "Use Global");
+                                ui.selectable_value(&mut current_interval, Some(0), "Disabled");
+                                ui.selectable_value(&mut current_interval, Some(60), "1 min");
+                                ui.selectable_value(&mut current_interval, Some(300), "5 min");
+                                ui.selectable_value(&mut current_interval, Some(600), "10 min");
+                                ui.selectable_value(&mut current_interval, Some(1800), "30 min");
+                            });
+                        
+                        if current_interval != acc.sync_interval_secs {
+                            let mut updated_acc = acc.clone();
+                            updated_acc.sync_interval_secs = current_interval;
+                            let _ = storage.save_account(&updated_acc);
+                            *on_data_changed = true;
+                        }
                     });
 
                     // Interactive Folder Sync Selector
@@ -1257,6 +1285,7 @@ impl SettingsView {
                                             credential_key: format!("mail_acc_{}_secret", ab.id),
                                             sync_days_window: ab.sync_days_window,
                                             is_enabled: ab.is_enabled,
+                                            sync_interval_secs: None,
                                             created_at: chrono::Utc::now().timestamp(),
                                             updated_at: chrono::Utc::now().timestamp(),
                                         };

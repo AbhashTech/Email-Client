@@ -147,6 +147,8 @@ pub struct Account {
     pub credential_key: String, // Lookup key in OS native keyring (zero plaintext in DB)
     pub sync_days_window: SyncWindow,
     pub is_enabled: bool,
+    #[serde(default)]
+    pub sync_interval_secs: Option<u64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -181,6 +183,7 @@ impl Account {
             credential_key,
             sync_days_window,
             is_enabled: true,
+            sync_interval_secs: None,
             created_at: now,
             updated_at: now,
         }

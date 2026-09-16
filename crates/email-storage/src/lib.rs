@@ -197,6 +197,10 @@ impl Storage {
             let _ = conn.execute("ALTER TABLE accounts ADD COLUMN sync_days_window INTEGER NOT NULL DEFAULT 30", []);
         }
 
+        if !acc_columns.is_empty() && !acc_columns.iter().any(|c| c == "sync_interval_secs") {
+            let _ = conn.execute("ALTER TABLE accounts ADD COLUMN sync_interval_secs INTEGER", []);
+        }
+
         Ok(())
     }
 
@@ -211,8 +215,8 @@ impl Storage {
             INSERT INTO accounts (
                 id, name, email, imap_host, imap_port, imap_security,
                 smtp_host, smtp_port, smtp_security, auth_type, credential_key,
-                sync_days_window, is_enabled, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                sync_days_window, is_enabled, created_at, updated_at, sync_interval_secs
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
                 email=excluded.email,
@@ -226,7 +230,8 @@ impl Storage {
                 credential_key=excluded.credential_key,
                 sync_days_window=excluded.sync_days_window,
                 is_enabled=excluded.is_enabled,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                sync_interval_secs=excluded.sync_interval_secs
             "#,
             params![
                 account.id,
@@ -244,6 +249,7 @@ impl Storage {
                 if account.is_enabled { 1 } else { 0 },
                 account.created_at,
                 account.updated_at,
+                account.sync_interval_secs,
             ],
         ).map_err(|e| EmailError::Database(e.to_string()))?;
         Ok(())
@@ -255,7 +261,7 @@ impl Storage {
             .prepare(
                 "SELECT id, name, email, imap_host, imap_port, imap_security,
                         smtp_host, smtp_port, smtp_security, auth_type, credential_key,
-                        sync_days_window, is_enabled, created_at, updated_at
+                        sync_days_window, is_enabled, created_at, updated_at, sync_interval_secs
                  FROM accounts ORDER BY created_at ASC",
             )
             .map_err(|e| EmailError::Database(e.to_string()))?;
@@ -267,6 +273,9 @@ impl Storage {
                 let auth_str: String = row.get(9)?;
                 let sync_days: i64 = row.get(11)?;
                 let is_enabled: i32 = row.get(12)?;
+                
+                // Read sync_interval_secs handling possible missing column
+                let sync_interval_secs: Option<i64> = row.get(15).unwrap_or(None);
 
                 Ok(Account {
                     id: row.get(0)?,
@@ -282,6 +291,7 @@ impl Storage {
                     credential_key: row.get(10)?,
                     sync_days_window: SyncWindow::from_days(sync_days),
                     is_enabled: is_enabled == 1,
+                    sync_interval_secs: sync_interval_secs.map(|s| s as u64),
                     created_at: row.get(13)?,
                     updated_at: row.get(14)?,
                 })
@@ -625,6 +635,30 @@ impl Storage {
         }
         tx.commit().map_err(|e| EmailError::Database(e.to_string()))?;
         Ok(())
+    }
+
+    pub fn get_known_contacts(&self, limit: usize) -> Result<Vec<(Option<String>, String)>> {
+        let conn = self.pool.get().map_err(|e| EmailError::Database(e.to_string()))?;
+        
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT from_name, from_address FROM messages WHERE from_address IS NOT NULL AND from_address != '' LIMIT ?")
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([limit], |row| {
+                let name: Option<String> = row.get(0)?;
+                let address: String = row.get(1)?;
+                Ok((name, address))
+            })
+            .map_err(|e| EmailError::Database(e.to_string()))?;
+
+        let mut contacts = Vec::new();
+        for row in rows {
+            if let Ok(c) = row {
+                contacts.push(c);
+            }
+        }
+        Ok(contacts)
     }
 
     pub fn get_messages(
