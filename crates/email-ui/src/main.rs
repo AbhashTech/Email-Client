@@ -79,6 +79,17 @@ fn main() -> Result<(), eframe::Error> {
     let idle_event_tx = event_tx.clone();
     email_sync::IdleWorker::start_for_all_accounts(idle_storage, idle_keyring, idle_event_tx, shutdown_token.clone());
 
+    // Pre-warm the keyring in-memory cache for all enabled accounts so that
+    // subsequent get_credential() calls on the UI thread are instant (<1µs) and never block on D-Bus.
+    if let Ok(accounts) = storage.get_accounts() {
+        let keyring_prewarm = keyring.clone();
+        rt_handle.spawn(async move {
+            for acc in accounts {
+                let _ = keyring_prewarm.get_credential(&acc.credential_key);
+            }
+        });
+    }
+
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("AT-mail-rs")

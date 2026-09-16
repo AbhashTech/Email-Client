@@ -25,7 +25,7 @@ pub enum SyncCommand {
     /// Send email draft via SMTP
     SendEmail {
         draft: OutgoingDraft,
-        password: String,
+        password: Option<String>,
     },
     /// Mark message read/unread
     SetReadStatus {

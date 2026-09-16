@@ -16,9 +16,32 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct PendingSend {
     pub draft: OutgoingDraft,
-    pub password: String,
     pub scheduled_time: std::time::Instant,
     pub duration: std::time::Duration,
+}
+
+#[derive(Debug)]
+pub enum UiAsyncLoadResult {
+    MessageDetailAndThread {
+        requested_id: String,
+        detail: Option<MessageDetail>,
+        thread_messages: Vec<MessageDetail>,
+    },
+    FoldersForAccount {
+        account_id: String,
+        folders: Vec<Folder>,
+    },
+    ReloadedMessages {
+        folder: FolderSelection,
+        messages: Vec<MessageHeader>,
+    },
+    QueueCounts {
+        scheduled: usize,
+        outbox: usize,
+    },
+    SnoozedReturned {
+        count: usize,
+    },
 }
 
 pub struct EmailApp {
@@ -26,7 +49,11 @@ pub struct EmailApp {
     keyring: Arc<dyn CredentialStore>,
     cmd_tx: mpsc::UnboundedSender<SyncCommand>,
     event_rx: broadcast::Receiver<SyncEvent>,
+    rt_handle: tokio::runtime::Handle,
     tray: Option<AppTray>,
+    egui_ctx: egui::Context,
+    async_load_tx: std::sync::mpsc::Sender<UiAsyncLoadResult>,
+    async_load_rx: std::sync::mpsc::Receiver<UiAsyncLoadResult>,
 
     // Data State
     accounts: Vec<Account>,
@@ -54,9 +81,7 @@ pub struct EmailApp {
     show_message_list: bool,
     is_window_visible: bool,
     is_maximized: bool,
-    last_scheduled_check: std::time::Instant,
-    last_outbox_check: std::time::Instant,
-    last_snoozed_check: std::time::Instant,
+    last_queue_check: std::time::Instant,
     scheduled_count: usize,
     outbox_count: usize,
     show_scheduled_modal: bool,
@@ -115,7 +140,8 @@ impl EmailApp {
             AppTheme::apply_preset(&cc.egui_ctx, current_theme);
         }
 
-        let tray = AppTray::new(cmd_tx.clone(), rt_handle);
+        let tray = AppTray::new(cmd_tx.clone(), rt_handle.clone());
+        let (async_load_tx, async_load_rx) = std::sync::mpsc::channel();
 
         let mut settings_view = SettingsView::new();
         settings_view.active_custom_theme_id = active_custom_theme_id;
@@ -125,7 +151,11 @@ impl EmailApp {
             keyring,
             cmd_tx,
             event_rx,
+            rt_handle,
             tray: Some(tray),
+            egui_ctx: cc.egui_ctx.clone(),
+            async_load_tx,
+            async_load_rx,
             accounts: Vec::new(),
             folders_by_account: HashMap::new(),
             messages: Vec::new(),
@@ -149,9 +179,7 @@ impl EmailApp {
             show_message_list: true,
             is_window_visible: true,
             is_maximized: false,
-            last_scheduled_check: std::time::Instant::now(),
-            last_outbox_check: std::time::Instant::now(),
-            last_snoozed_check: std::time::Instant::now(),
+            last_queue_check: std::time::Instant::now(),
             scheduled_count: 0,
             outbox_count: 0,
             show_scheduled_modal: false,
@@ -210,7 +238,13 @@ impl EmailApp {
         self.outbox_count = self.storage.get_all_outbox_items(None).unwrap_or_default().len();
 
         self.update_tray_unread();
-        self.reload_messages();
+        if let Ok(msgs) = self.storage.get_messages(None, None, 150, 0, None) {
+            let mut m = msgs;
+            if matches!(self.selected_folder, FolderSelection::UnifiedUnread) {
+                m.retain(|msg| !msg.is_read);
+            }
+            self.messages = m;
+        }
     }
 
     pub fn update_tray_unread(&self) {
@@ -226,94 +260,117 @@ impl EmailApp {
         }
     }
 
+    #[allow(dead_code)]
     pub fn load_selected_thread(&mut self) {
         if let Some(ref detail) = self.selected_message_detail {
-            self.selected_thread_messages = self
-                .storage
-                .get_conversation_thread(&detail.header.id)
-                .ok()
-                .flatten()
-                .map(|t| t.messages)
-                .unwrap_or_else(|| vec![detail.clone()]);
+            let storage_for_thread = self.storage.clone();
+            let mid_clone = detail.header.id.clone();
+            let det_clone = detail.clone();
+            let tx = self.async_load_tx.clone();
+            let egui_ctx = self.egui_ctx.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let thread_messages = storage_for_thread
+                    .get_conversation_thread(&det_clone.header.id)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.messages)
+                    .unwrap_or_else(|| vec![det_clone.clone()]);
+                let _ = tx.send(UiAsyncLoadResult::MessageDetailAndThread {
+                    requested_id: mid_clone,
+                    detail: Some(det_clone),
+                    thread_messages,
+                });
+                egui_ctx.request_repaint();
+            });
         } else {
             self.selected_thread_messages.clear();
         }
     }
 
-    pub fn reload_messages(&mut self) {
+    pub fn trigger_async_reload_messages(&self) {
+        let folder = self.selected_folder.clone();
         let search = if self.search_query.is_empty() {
             None
         } else {
-            Some(self.search_query.as_str())
+            Some(self.search_query.clone())
         };
+        let storage = self.storage.clone();
+        let tx = self.async_load_tx.clone();
+        let egui_ctx = self.egui_ctx.clone();
 
-        match &self.selected_folder {
-            FolderSelection::UnifiedOutbox => {
-                if let Ok(items) = self.storage.get_all_outbox_items(None) {
-                    self.messages = items
-                        .into_iter()
-                        .map(|item| {
-                            let snippet = if let Some(ref err) = item.last_error {
-                                format!("⚠️ Retry {}/{} failed: {}", item.retry_count, item.max_retries, err)
-                            } else {
-                                format!("📤 Queued for delivery (Retry count: {})", item.retry_count)
-                            };
-                            MessageHeader {
-                                id: format!("outbox_{}", item.id),
-                                account_id: item.account_id,
-                                folder_id: "outbox".to_string(),
-                                uid: 0,
-                                message_id: None,
-                                in_reply_to: item.draft.in_reply_to,
-                                subject: format!("[Outbox] {}", item.draft.subject),
-                                from_name: Some("Outbox Auto-Retry".to_string()),
-                                from_address: "outbox@queue".to_string(),
-                                to_recipients: item.draft.to,
-                                cc_recipients: item.draft.cc,
-                                date_epoch: item.created_at,
-                                snippet,
-                                is_read: true,
-                                is_flagged: false,
-                                is_draft: true,
-                                is_deleted: false,
-                                body_fetched: true,
-                                size_bytes: item.draft.body_plain.len() as u64,
-                                snooze_until: None,
-                            }
-                        })
-                        .collect();
-                }
-            }
-            FolderSelection::UnifiedSnoozed => {
-                if let Ok(msgs) = self.storage.get_snoozed_messages(None) {
-                    self.messages = msgs;
-                }
-            }
-            FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
-                if let Ok(mut msgs) = self.storage.get_messages(None, None, 150, 0, search) {
-                    if matches!(self.selected_folder, FolderSelection::UnifiedFlagged) {
-                        msgs.retain(|m| m.is_flagged);
-                    } else if matches!(self.selected_folder, FolderSelection::UnifiedUnread) {
-                        msgs.retain(|m| !m.is_read);
+        self.rt_handle.spawn_blocking(move || {
+            let search_ref = search.as_deref();
+            let messages = match &folder {
+                FolderSelection::UnifiedOutbox => {
+                    if let Ok(items) = storage.get_all_outbox_items(None) {
+                        items
+                            .into_iter()
+                            .map(|item| {
+                                let snippet = if let Some(ref err) = item.last_error {
+                                    format!("⚠️ Retry {}/{} failed: {}", item.retry_count, item.max_retries, err)
+                                } else {
+                                    format!("📤 Queued for delivery (Retry count: {})", item.retry_count)
+                                };
+                                MessageHeader {
+                                    id: format!("outbox_{}", item.id),
+                                    account_id: item.account_id,
+                                    folder_id: "outbox".to_string(),
+                                    uid: 0,
+                                    message_id: None,
+                                    in_reply_to: item.draft.in_reply_to,
+                                    subject: format!("[Outbox] {}", item.draft.subject),
+                                    from_name: Some("Outbox Auto-Retry".to_string()),
+                                    from_address: "outbox@queue".to_string(),
+                                    to_recipients: item.draft.to,
+                                    cc_recipients: item.draft.cc,
+                                    date_epoch: item.created_at,
+                                    snippet,
+                                    is_read: true,
+                                    is_flagged: false,
+                                    is_draft: true,
+                                    is_deleted: false,
+                                    body_fetched: true,
+                                    size_bytes: item.draft.body_plain.len() as u64,
+                                    snooze_until: None,
+                                }
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
                     }
-                    self.messages = msgs;
                 }
-            }
-            FolderSelection::Folder {
-                account_id,
-                folder_id,
-            } => {
-                if let Ok(msgs) = self.storage.get_messages(
-                    Some(account_id),
-                    Some(folder_id),
-                    150,
-                    0,
-                    search,
-                ) {
-                    self.messages = msgs;
+                FolderSelection::UnifiedSnoozed => {
+                    storage.get_snoozed_messages(None).unwrap_or_default()
                 }
-            }
-        }
+                FolderSelection::UnifiedFlagged | FolderSelection::UnifiedUnread => {
+                    if let Ok(mut msgs) = storage.get_messages(None, None, 150, 0, search_ref) {
+                        if matches!(folder, FolderSelection::UnifiedFlagged) {
+                            msgs.retain(|m| m.is_flagged);
+                        } else if matches!(folder, FolderSelection::UnifiedUnread) {
+                            msgs.retain(|m| !m.is_read);
+                        }
+                        msgs
+                    } else {
+                        Vec::new()
+                    }
+                }
+                FolderSelection::Folder {
+                    account_id,
+                    folder_id,
+                } => {
+                    storage
+                        .get_messages(Some(account_id), Some(folder_id), 150, 0, search_ref)
+                        .unwrap_or_default()
+                }
+            };
+
+            let _ = tx.send(UiAsyncLoadResult::ReloadedMessages { folder, messages });
+            egui_ctx.request_repaint();
+        });
+    }
+
+    pub fn reload_messages(&mut self) {
+        self.trigger_async_reload_messages();
     }
 
     fn poll_background_events(&mut self, ctx: &egui::Context) {
@@ -361,6 +418,47 @@ impl EmailApp {
             }
         }
 
+        // Poll Async Data Loads
+        while let Ok(result) = self.async_load_rx.try_recv() {
+            match result {
+                UiAsyncLoadResult::MessageDetailAndThread {
+                    requested_id,
+                    detail,
+                    thread_messages,
+                } => {
+                    if self.selected_message_id.as_deref() == Some(&requested_id) {
+                        self.selected_message_detail = detail;
+                        self.selected_thread_messages = thread_messages;
+                    }
+                }
+                UiAsyncLoadResult::FoldersForAccount {
+                    account_id,
+                    folders,
+                } => {
+                    self.folders_by_account.insert(account_id, folders);
+                    self.update_tray_unread();
+                }
+                UiAsyncLoadResult::ReloadedMessages { folder, messages } => {
+                    if self.selected_folder == folder {
+                        self.messages = messages;
+                    }
+                }
+                UiAsyncLoadResult::QueueCounts { scheduled, outbox } => {
+                    self.scheduled_count = scheduled;
+                    self.outbox_count = outbox;
+                }
+                UiAsyncLoadResult::SnoozedReturned { count } => {
+                    if count > 0 {
+                        self.status_toast = Some((
+                            format!("🔔 {} snoozed email(s) returned to your Inbox!", count),
+                            std::time::Instant::now(),
+                        ));
+                        self.trigger_async_reload_messages();
+                    }
+                }
+            }
+        }
+
         // Poll Sync Events
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -380,18 +478,31 @@ impl EmailApp {
                 }
                 SyncEvent::FolderSynced {
                     account_id,
-                    folder_id: _,
+                    folder_id,
                     new_messages_count,
                 } => {
                     if new_messages_count > 0 {
-                        self.reload_data();
-                    } else {
-                        // Light-weight folder update without full reload
-                        if let Ok(folders) = self.storage.get_folders_for_account(&account_id) {
-                            self.folders_by_account.insert(account_id, folders);
-                            self.update_tray_unread();
+                        let is_current = match &self.selected_folder {
+                            FolderSelection::Folder { folder_id: cur_f, .. } => cur_f == &folder_id,
+                            _ => true,
+                        };
+                        if is_current {
+                            self.reload_messages();
                         }
                     }
+                    let storage_clone = self.storage.clone();
+                    let acc_id = account_id.clone();
+                    let tx = self.async_load_tx.clone();
+                    let egui_ctx = self.egui_ctx.clone();
+                    self.rt_handle.spawn_blocking(move || {
+                        if let Ok(folders) = storage_clone.get_folders_for_account(&acc_id) {
+                            let _ = tx.send(UiAsyncLoadResult::FoldersForAccount {
+                                account_id: acc_id,
+                                folders,
+                            });
+                            egui_ctx.request_repaint();
+                        }
+                    });
                 }
                 SyncEvent::FoldersDiscovered {
                     account_id: _,
@@ -406,7 +517,25 @@ impl EmailApp {
                 SyncEvent::BodyFetched { message_id, detail } => {
                     if self.selected_message_id.as_deref() == Some(&message_id) {
                         self.selected_message_detail = Some(*detail.clone());
-                        self.load_selected_thread();
+                        let storage_for_thread = self.storage.clone();
+                        let mid_clone = message_id.clone();
+                        let tx = self.async_load_tx.clone();
+                        let egui_ctx = self.egui_ctx.clone();
+                        let det_clone = *detail.clone();
+                        self.rt_handle.spawn_blocking(move || {
+                            let thread_messages = storage_for_thread
+                                .get_conversation_thread(&det_clone.header.id)
+                                .ok()
+                                .flatten()
+                                .map(|t| t.messages)
+                                .unwrap_or_else(|| vec![det_clone.clone()]);
+                            let _ = tx.send(UiAsyncLoadResult::MessageDetailAndThread {
+                                requested_id: mid_clone,
+                                detail: Some(det_clone),
+                                thread_messages,
+                            });
+                            egui_ctx.request_repaint();
+                        });
                     }
                     if let Some(m) = self.messages.iter_mut().find(|m| m.id == message_id) {
                         *m = detail.header.clone();
@@ -443,67 +572,74 @@ impl EmailApp {
                                 .show();
                         });
                     }
-                    self.reload_data();
+                    self.reload_messages();
                 }
             }
         }
 
-        self.check_scheduled_queue();
-        self.check_snoozed_queue();
-        self.check_outbox_queue();
+        self.check_background_queues();
     }
 
-    pub fn check_outbox_queue(&mut self) {
-        if self.last_outbox_check.elapsed() < std::time::Duration::from_secs(10) {
+    pub fn check_background_queues(&mut self) {
+        if self.last_queue_check.elapsed() < std::time::Duration::from_secs(10) {
             return;
         }
-        self.last_outbox_check = std::time::Instant::now();
+        self.last_queue_check = std::time::Instant::now();
 
-        if let Ok(all_outbox) = self.storage.get_all_outbox_items(None) {
-            self.outbox_count = all_outbox.len();
-        }
-
-        if let Ok(due_items) = self.storage.get_due_outbox_items() {
-            for item in due_items {
-                let acc_opt = self.accounts.iter().find(|a| a.id == item.account_id).cloned();
-                if let Some(acc) = acc_opt {
-                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
-                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
-                            draft: item.draft.clone(),
-                            password: pwd,
-                        });
-                        let _ = self.storage.delete_outbox_item(&item.id);
-                        self.outbox_count = self.outbox_count.saturating_sub(1);
-                        self.status_toast = Some((
-                            format!("✓ Outbox Auto-Retry: Transmitting '{}'", item.draft.subject),
-                            std::time::Instant::now(),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn check_snoozed_queue(&mut self) {
-        if self.last_snoozed_check.elapsed() < std::time::Duration::from_secs(10) {
-            return;
-        }
-        self.last_snoozed_check = std::time::Instant::now();
-
+        let storage_clone = self.storage.clone();
+        let cmd_tx_clone = self.cmd_tx.clone();
+        let tx = self.async_load_tx.clone();
+        let egui_ctx = self.egui_ctx.clone();
         let now_ts = chrono::Utc::now().timestamp();
-        if let Ok(due_snoozed) = self.storage.get_due_snoozed_messages(now_ts) {
-            let count = due_snoozed.len();
-            for msg in due_snoozed {
-                let _ = self.storage.unsnooze_message(&msg.id);
+
+        self.rt_handle.spawn_blocking(move || {
+            let mut outbox_cnt = 0;
+            if let Ok(all_outbox) = storage_clone.get_all_outbox_items(None) {
+                outbox_cnt = all_outbox.len();
             }
-            if count > 0 {
-                self.status_toast = Some((
-                    format!("🔔 {} snoozed email(s) returned to your Inbox!", count),
-                    std::time::Instant::now(),
-                ));
-                self.reload_data();
+            if let Ok(due_items) = storage_clone.get_due_outbox_items() {
+                for item in due_items {
+                    let _ = cmd_tx_clone.send(SyncCommand::SendEmail {
+                        draft: item.draft.clone(),
+                        password: None,
+                    });
+                    let _ = storage_clone.delete_outbox_item(&item.id);
+                }
             }
-        }
+
+            let mut snoozed_restored = 0;
+            if let Ok(due_snoozed) = storage_clone.get_due_snoozed_messages(now_ts) {
+                snoozed_restored = due_snoozed.len();
+                for msg in due_snoozed {
+                    let _ = storage_clone.unsnooze_message(&msg.id);
+                }
+            }
+
+            let mut sched_cnt = 0;
+            if let Ok(all_sched) = storage_clone.list_all_scheduled(None) {
+                sched_cnt = all_sched.len();
+            }
+            if let Ok(due_list) = storage_clone.get_due_scheduled_emails(now_ts) {
+                for item in due_list {
+                    let _ = cmd_tx_clone.send(SyncCommand::SendEmail {
+                        draft: item.draft.clone(),
+                        password: None,
+                    });
+                    let _ = storage_clone.delete_scheduled_email(&item.id);
+                }
+            }
+
+            let _ = tx.send(UiAsyncLoadResult::QueueCounts {
+                scheduled: sched_cnt,
+                outbox: outbox_cnt,
+            });
+            if snoozed_restored > 0 {
+                let _ = tx.send(UiAsyncLoadResult::SnoozedReturned {
+                    count: snoozed_restored,
+                });
+            }
+            egui_ctx.request_repaint();
+        });
     }
 
     pub fn handle_close_requested(&mut self, ctx: &egui::Context) {
@@ -519,44 +655,8 @@ impl EmailApp {
                 }
             }
             crate::CloseButtonAction::QuitApplication => {
-                // Set the graceful quit flag — eframe will call ViewportCommand::Close
-                // from the update() loop, allowing Rust drop chains and Tokio to shut
-                // down cleanly (no "wait or terminate" dialog on Linux compositors).
-                // Also cancel the shared token so IMAP IDLE tasks exit promptly.
                 self.shutdown.cancel();
                 self.should_quit = true;
-            }
-        }
-    }
-
-    pub fn check_scheduled_queue(&mut self) {
-        if self.last_scheduled_check.elapsed() < std::time::Duration::from_secs(10) {
-            return;
-        }
-        self.last_scheduled_check = std::time::Instant::now();
-
-        if let Ok(all_sched) = self.storage.list_all_scheduled(None) {
-            self.scheduled_count = all_sched.len();
-        }
-
-        let now_ts = chrono::Utc::now().timestamp();
-        if let Ok(due_list) = self.storage.get_due_scheduled_emails(now_ts) {
-            for item in due_list {
-                let acc_opt = self.accounts.iter().find(|a| a.id == item.account_id).cloned();
-                if let Some(acc) = acc_opt {
-                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
-                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
-                            draft: item.draft.clone(),
-                            password: pwd,
-                        });
-                        let _ = self.storage.delete_scheduled_email(&item.id);
-                        self.scheduled_count = self.scheduled_count.saturating_sub(1);
-                        self.status_toast = Some((
-                            format!("✓ Transmitting scheduled email: '{}'", item.draft.subject),
-                            std::time::Instant::now(),
-                        ));
-                    }
-                }
             }
         }
     }
@@ -600,8 +700,19 @@ impl EmailApp {
         }
     }
 
-    // Enhancement 3: Read process RSS cross-platform (Linux, macOS, Windows) using sysinfo
+    // Enhancement 3: Read process RSS cross-platform (instant /proc on Linux, sysinfo fallback)
     fn read_rss_memory() -> String {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
+                if let Some(rss_pages_str) = content.split_whitespace().nth(1) {
+                    if let Ok(pages) = rss_pages_str.parse::<u64>() {
+                        let mb = (pages * 4) / 1024;
+                        return format!("{} MB", mb);
+                    }
+                }
+            }
+        }
         use sysinfo::{Pid, ProcessesToUpdate, System};
         let pid = Pid::from_u32(std::process::id());
         let mut sys = System::new();
@@ -630,8 +741,15 @@ impl EmailApp {
             .map(|m| (m.id.clone(), m.account_id.clone(), m.folder_id.clone(), m.uid))
             .collect();
 
-        for (mid, account_id, folder_id, uid) in &unread_ids {
-            let _ = self.storage.set_message_read(mid, true);
+        let storage_clone = self.storage.clone();
+        let unread_ids_clone = unread_ids.clone();
+        self.rt_handle.spawn_blocking(move || {
+            for (mid, _, _, _) in unread_ids_clone {
+                let _ = storage_clone.set_message_read(&mid, true);
+            }
+        });
+
+        for (_mid, account_id, folder_id, uid) in &unread_ids {
             let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
                 account_id: account_id.clone(),
                 folder_id: folder_id.clone(),
@@ -856,7 +974,11 @@ impl EmailApp {
             }
             PaletteAction::MarkRead => {
                 if let Some(ref mid) = self.selected_message_id {
-                    let _ = self.storage.set_message_read(mid, true);
+                    let storage_clone = self.storage.clone();
+                    let m_id = mid.clone();
+                    self.rt_handle.spawn_blocking(move || {
+                        let _ = storage_clone.set_message_read(&m_id, true);
+                    });
                     if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                         m.is_read = true;
                         let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
@@ -886,7 +1008,11 @@ impl EmailApp {
             }
             PaletteAction::MarkUnread => {
                 if let Some(ref mid) = self.selected_message_id {
-                    let _ = self.storage.set_message_read(mid, false);
+                    let storage_clone = self.storage.clone();
+                    let m_id = mid.clone();
+                    self.rt_handle.spawn_blocking(move || {
+                        let _ = storage_clone.set_message_read(&m_id, false);
+                    });
                     if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                         m.is_read = false;
                         let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
@@ -920,7 +1046,11 @@ impl EmailApp {
                     if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                         new_flag = !m.is_flagged;
                         m.is_flagged = new_flag;
-                        let _ = self.storage.set_message_flagged(mid, new_flag);
+                        let storage_clone = self.storage.clone();
+                        let m_id = mid.clone();
+                        self.rt_handle.spawn_blocking(move || {
+                            let _ = storage_clone.set_message_flagged(&m_id, new_flag);
+                        });
                         let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
                             account_id: m.account_id.clone(),
                             folder_id: m.folder_id.clone(),
@@ -949,9 +1079,16 @@ impl EmailApp {
                     Vec::new()
                 };
 
+                let storage_clone = self.storage.clone();
+                let del_clone = to_delete.clone();
+                self.rt_handle.spawn_blocking(move || {
+                    for mid in &del_clone {
+                        let _ = storage_clone.delete_message(mid);
+                    }
+                });
+
                 for mid in &to_delete {
                     if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
-                        let _ = self.storage.delete_message(mid);
                         let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
                             account_id: m.account_id.clone(),
                             folder_id: m.folder_id.clone(),
@@ -959,11 +1096,11 @@ impl EmailApp {
                         });
                     }
                 }
+                self.messages.retain(|m| !to_delete.contains(&m.id));
                 self.selected_message_ids.clear();
                 self.selected_message_id = None;
                 self.selected_message_detail = None;
                 self.selected_thread_messages.clear();
-                self.reload_data();
             }
             PaletteAction::Reply => {
                 if let Some(ref detail) = self.selected_message_detail {
@@ -1024,6 +1161,8 @@ impl EmailApp {
 
 impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Ensure Wayland window title is committed so compositor never reports "(unknown)"
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("AT-mail-rs".to_string()));
         self.poll_background_events(ctx);
 
         // Bug Fix: Graceful quit — let eframe close the window cleanly instead of
@@ -1379,23 +1518,30 @@ impl App for EmailApp {
 
                     if let Some((ids_to_move, account_id, target_folder_id)) = on_drop_move {
                         let mut moved_count = 0;
+                        let storage_clone = self.storage.clone();
+                        let ids_clone = ids_to_move.clone();
+                        let tf_clone = target_folder_id.clone();
+                        self.rt_handle.spawn_blocking(move || {
+                            for mid in &ids_clone {
+                                let _ = storage_clone.move_message_to_folder(mid, &tf_clone);
+                            }
+                        });
                         for mid in &ids_to_move {
-                            if let Ok(Some(detail)) = self.storage.get_message_detail(mid) {
-                                let _ = self.storage.move_message_to_folder(mid, &target_folder_id);
+                            if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
                                 let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
                                     account_id: account_id.clone(),
-                                    source_folder_id: detail.header.folder_id,
+                                    source_folder_id: m.folder_id.clone(),
                                     target_folder_id: target_folder_id.clone(),
-                                    uid: detail.header.uid,
+                                    uid: m.uid,
                                     message_id: mid.clone(),
                                 });
                                 moved_count += 1;
                             }
                         }
+                        self.messages.retain(|m| !ids_to_move.contains(&m.id));
                         self.selected_message_ids.clear();
                         self.selected_message_id = None;
                         self.selected_message_detail = None;
-                        self.reload_data();
                         let target_folder_name = self.folders_by_account.values().flatten().find(|f| f.id == target_folder_id).map(|f| f.display_name.as_str()).unwrap_or("folder");
                         let toast = format!("Moved {} message(s) to {}", moved_count, target_folder_name);
                         self.status_text = toast.clone();
@@ -1454,9 +1600,15 @@ impl App for EmailApp {
         }
 
         if let Some(ids_to_delete) = on_batch_delete {
+            let storage_clone = self.storage.clone();
+            let ids_clone = ids_to_delete.clone();
+            self.rt_handle.spawn_blocking(move || {
+                for mid in &ids_clone {
+                    let _ = storage_clone.delete_message(mid);
+                }
+            });
             for mid in &ids_to_delete {
                 if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
-                    let _ = self.storage.delete_message(mid);
                     let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
                         account_id: m.account_id.clone(),
                         folder_id: m.folder_id.clone(),
@@ -1464,10 +1616,10 @@ impl App for EmailApp {
                     });
                 }
             }
+            self.messages.retain(|m| !ids_to_delete.contains(&m.id));
             self.selected_message_ids.clear();
             self.selected_message_id = None;
             self.selected_message_detail = None;
-            self.reload_data();
             let toast = format!("Deleted {} email(s)", ids_to_delete.len());
             self.status_text = toast.clone();
             self.status_toast = Some((toast, std::time::Instant::now()));
@@ -1475,9 +1627,16 @@ impl App for EmailApp {
 
         if let Some((ids_to_move, target_folder_id)) = on_batch_move {
             let mut moved_count = 0;
+            let storage_clone = self.storage.clone();
+            let ids_clone = ids_to_move.clone();
+            let tf_clone = target_folder_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                for mid in &ids_clone {
+                    let _ = storage_clone.move_message_to_folder(mid, &tf_clone);
+                }
+            });
             for mid in &ids_to_move {
                 if let Some(m) = self.messages.iter().find(|m| &m.id == mid) {
-                    let _ = self.storage.move_message_to_folder(mid, &target_folder_id);
                     let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
                         account_id: m.account_id.clone(),
                         source_folder_id: m.folder_id.clone(),
@@ -1488,10 +1647,10 @@ impl App for EmailApp {
                     moved_count += 1;
                 }
             }
+            self.messages.retain(|m| !ids_to_move.contains(&m.id));
             self.selected_message_ids.clear();
             self.selected_message_id = None;
             self.selected_message_detail = None;
-            self.reload_data();
             let target_folder_name = self.folders_by_account.values().flatten().find(|f| f.id == target_folder_id).map(|f| f.display_name.as_str()).unwrap_or("folder");
             let toast = format!("Moved {} email(s) to {}", moved_count, target_folder_name);
             self.status_text = toast.clone();
@@ -1499,8 +1658,14 @@ impl App for EmailApp {
         }
 
         if let Some((ids, is_read)) = on_batch_toggle_read {
+            let storage_clone = self.storage.clone();
+            let ids_clone = ids.clone();
+            self.rt_handle.spawn_blocking(move || {
+                for mid in &ids_clone {
+                    let _ = storage_clone.set_message_read(mid, is_read);
+                }
+            });
             for mid in &ids {
-                let _ = self.storage.set_message_read(mid, is_read);
                 if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                     m.is_read = is_read;
                     let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
@@ -1534,8 +1699,14 @@ impl App for EmailApp {
         }
 
         if let Some((ids, is_flag)) = on_batch_toggle_flag {
+            let storage_clone = self.storage.clone();
+            let ids_clone = ids.clone();
+            self.rt_handle.spawn_blocking(move || {
+                for mid in &ids_clone {
+                    let _ = storage_clone.set_message_flagged(mid, is_flag);
+                }
+            });
             for mid in &ids {
-                let _ = self.storage.set_message_flagged(mid, is_flag);
                 if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                     m.is_flagged = is_flag;
                     let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
@@ -1559,7 +1730,11 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, is_read)) = on_toggle_read {
-            let _ = self.storage.set_message_read(&msg_id, is_read);
+            let storage_clone = self.storage.clone();
+            let m_id = msg_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let _ = storage_clone.set_message_read(&m_id, is_read);
+            });
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
                 m.is_read = is_read;
                 let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
@@ -1592,7 +1767,11 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, is_flag)) = on_toggle_flag {
-            let _ = self.storage.set_message_flagged(&msg_id, is_flag);
+            let storage_clone = self.storage.clone();
+            let m_id = msg_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let _ = storage_clone.set_message_flagged(&m_id, is_flag);
+            });
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
                 m.is_flagged = is_flag;
                 let _ = self.cmd_tx.send(SyncCommand::SetFlaggedStatus {
@@ -1616,7 +1795,11 @@ impl App for EmailApp {
 
         if prev_msg_id != self.selected_message_id {
             if let Some(ref mid) = self.selected_message_id {
-                let _ = self.storage.set_message_read(mid, true);
+                let storage_clone = self.storage.clone();
+                let m_id = mid.clone();
+                self.rt_handle.spawn_blocking(move || {
+                    let _ = storage_clone.set_message_read(&m_id, true);
+                });
                 if let Some(m) = self.messages.iter_mut().find(|m| &m.id == mid) {
                     if !m.is_read {
                         m.is_read = true;
@@ -1633,10 +1816,40 @@ impl App for EmailApp {
                         }
                     }
                 }
-                if let Ok(detail_opt) = self.storage.get_message_detail(mid) {
-                    self.selected_message_detail = detail_opt;
+                if let Some(hdr) = self.messages.iter().find(|m| &m.id == mid).cloned() {
+                    let stub = MessageDetail {
+                        header: hdr,
+                        body_plain: None,
+                        body_html: None,
+                        attachments: Vec::new(),
+                    };
+                    self.selected_thread_messages = vec![stub.clone()];
+                    self.selected_message_detail = Some(stub);
                 }
-                self.load_selected_thread();
+
+                let storage_for_thread = self.storage.clone();
+                let mid_clone = mid.clone();
+                let tx = self.async_load_tx.clone();
+                let egui_ctx = self.egui_ctx.clone();
+                self.rt_handle.spawn_blocking(move || {
+                    let detail = storage_for_thread.get_message_detail(&mid_clone).ok().flatten();
+                    let thread_messages = if let Some(ref d) = detail {
+                        storage_for_thread
+                            .get_conversation_thread(&d.header.id)
+                            .ok()
+                            .flatten()
+                            .map(|t| t.messages)
+                            .unwrap_or_else(|| vec![d.clone()])
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.send(UiAsyncLoadResult::MessageDetailAndThread {
+                        requested_id: mid_clone,
+                        detail,
+                        thread_messages,
+                    });
+                    egui_ctx.request_repaint();
+                });
                 self.update_tray_unread();
             } else {
                 self.selected_message_detail = None;
@@ -1772,7 +1985,11 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, is_read)) = on_toggle_read_view {
-            let _ = self.storage.set_message_read(&msg_id, is_read);
+            let storage_clone = self.storage.clone();
+            let mid = msg_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let _ = storage_clone.set_message_read(&mid, is_read);
+            });
             if let Some(m) = self.messages.iter_mut().find(|m| m.id == msg_id) {
                 m.is_read = is_read;
                 let _ = self.cmd_tx.send(SyncCommand::SetReadStatus {
@@ -1811,15 +2028,19 @@ impl App for EmailApp {
                 .find(|m| m.id == msg_id)
                 .map(|m| (m.account_id.clone(), m.folder_id.clone(), m.uid))
                 .or_else(|| {
-                    self.storage
-                        .get_message_detail(&msg_id)
-                        .ok()
-                        .flatten()
-                        .map(|d| (d.header.account_id, d.header.folder_id, d.header.uid))
+                    self.selected_message_detail
+                        .as_ref()
+                        .filter(|d| d.header.id == msg_id)
+                        .map(|d| (d.header.account_id.clone(), d.header.folder_id.clone(), d.header.uid))
                 });
 
             if let Some((account_id, source_folder_id, uid)) = msg_info {
-                let _ = self.storage.move_message_to_folder(&msg_id, &target_folder_id);
+                let storage_clone = self.storage.clone();
+                let m_id = msg_id.clone();
+                let tf_id = target_folder_id.clone();
+                self.rt_handle.spawn_blocking(move || {
+                    let _ = storage_clone.move_message_to_folder(&m_id, &tf_id);
+                });
                 let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
                     account_id,
                     source_folder_id,
@@ -1828,10 +2049,10 @@ impl App for EmailApp {
                     message_id: msg_id.clone(),
                 });
             }
+            self.messages.retain(|m| m.id != msg_id);
             self.selected_message_id = None;
             self.selected_message_detail = None;
             self.selected_thread_messages.clear();
-            self.reload_data();
             let target_folder_name = self
                 .folders_by_account
                 .values()
@@ -1845,7 +2066,11 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, snooze_until)) = on_snooze {
-            let _ = self.storage.snooze_message(&msg_id, snooze_until);
+            let storage_clone = self.storage.clone();
+            let m_id = msg_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let _ = storage_clone.snooze_message(&m_id, snooze_until);
+            });
             if snooze_until.is_some() {
                 self.messages.retain(|m| m.id != msg_id);
                 self.selected_message_id = None;
@@ -1863,22 +2088,25 @@ impl App for EmailApp {
                     }
                 }
             }
-            self.reload_data();
         }
 
         if let Some(msg_id) = on_delete {
             if let Some(m) = self.messages.iter().find(|m| m.id == msg_id).cloned() {
-                let _ = self.storage.delete_message(&msg_id);
+                let storage_clone = self.storage.clone();
+                let m_id = msg_id.clone();
+                self.rt_handle.spawn_blocking(move || {
+                    let _ = storage_clone.delete_message(&m_id);
+                });
                 let _ = self.cmd_tx.send(SyncCommand::DeleteMessage {
                     account_id: m.account_id,
                     folder_id: m.folder_id,
                     uid: m.uid,
                 });
             }
+            self.messages.retain(|m| m.id != msg_id);
             self.selected_message_id = None;
             self.selected_message_detail = None;
             self.selected_thread_messages.clear();
-            self.reload_data();
         }
 
         // Modals
@@ -1889,7 +2117,7 @@ impl App for EmailApp {
             &self.keyring,
         );
 
-        let mut on_schedule_send: Option<(OutgoingDraft, String)> = None;
+        let mut on_schedule_send: Option<OutgoingDraft> = None;
         let mut on_compose_data_changed = false;
 
         self.compose_view.show(
@@ -1905,13 +2133,20 @@ impl App for EmailApp {
         );
 
         if on_compose_data_changed {
-            self.reload_data();
+            let storage_clone = self.storage.clone();
+            let tx = self.async_load_tx.clone();
+            let egui_ctx = self.egui_ctx.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let scheduled = storage_clone.list_all_scheduled(None).unwrap_or_default().len();
+                let outbox = storage_clone.get_all_outbox_items(None).unwrap_or_default().len();
+                let _ = tx.send(UiAsyncLoadResult::QueueCounts { scheduled, outbox });
+                egui_ctx.request_repaint();
+            });
         }
 
-        if let Some((draft, pwd)) = on_schedule_send {
+        if let Some(draft) = on_schedule_send {
             self.pending_send = Some(PendingSend {
                 draft,
-                password: pwd,
                 scheduled_time: std::time::Instant::now(),
                 duration: std::time::Duration::from_secs(5),
             });
@@ -1946,18 +2181,24 @@ impl App for EmailApp {
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             if ui.button(RichText::new("🗑 Cancel").size(11.0).color(AppTheme::ACCENT_DANGER)).clicked() {
-                                                let _ = self.storage.delete_scheduled_email(&item.id);
+                                                let storage_clone = self.storage.clone();
+                                                let item_id = item.id.clone();
+                                                self.rt_handle.spawn_blocking(move || {
+                                                    let _ = storage_clone.delete_scheduled_email(&item_id);
+                                                });
+                                                self.scheduled_count = self.scheduled_count.saturating_sub(1);
                                             }
                                             if ui.button(RichText::new("🚀 Send Now").size(11.0)).clicked() {
-                                                if let Some(acc) = self.accounts.iter().find(|a| a.id == item.account_id) {
-                                                    if let Ok(pwd) = self.keyring.get_credential(&acc.credential_key) {
-                                                        let _ = self.cmd_tx.send(SyncCommand::SendEmail {
-                                                            draft: item.draft.clone(),
-                                                            password: pwd,
-                                                        });
-                                                        let _ = self.storage.delete_scheduled_email(&item.id);
-                                                    }
-                                                }
+                                                let _ = self.cmd_tx.send(SyncCommand::SendEmail {
+                                                    draft: item.draft.clone(),
+                                                    password: None,
+                                                });
+                                                let storage_clone = self.storage.clone();
+                                                let item_id = item.id.clone();
+                                                self.rt_handle.spawn_blocking(move || {
+                                                    let _ = storage_clone.delete_scheduled_email(&item_id);
+                                                });
+                                                self.scheduled_count = self.scheduled_count.saturating_sub(1);
                                             }
                                         });
                                     });
@@ -2006,18 +2247,23 @@ impl App for EmailApp {
         }
 
         if let Some((msg_id, account_id, source_folder_id, target_folder_id, uid, target_folder_name)) = modal_move_action {
-            let _ = self.storage.move_message_to_folder(&msg_id, &target_folder_id);
+            let storage_clone = self.storage.clone();
+            let m_id = msg_id.clone();
+            let tf_id = target_folder_id.clone();
+            self.rt_handle.spawn_blocking(move || {
+                let _ = storage_clone.move_message_to_folder(&m_id, &tf_id);
+            });
             let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
                 account_id,
                 source_folder_id,
                 target_folder_id,
-                message_id: msg_id,
+                message_id: msg_id.clone(),
                 uid,
             });
+            self.messages.retain(|m| m.id != msg_id);
             self.selected_message_id = None;
             self.selected_message_detail = None;
             self.selected_thread_messages.clear();
-            self.reload_data();
             let toast = format!("Moved email to {}", target_folder_name);
             self.status_text = toast.clone();
             self.status_toast = Some((toast, std::time::Instant::now()));
@@ -2165,7 +2411,7 @@ impl App for EmailApp {
             if elapsed >= pending.duration {
                 let _ = self.cmd_tx.send(SyncCommand::SendEmail {
                     draft: pending.draft,
-                    password: pending.password,
+                    password: None,
                 });
                 self.status_toast = Some(("Email sent successfully!".to_string(), std::time::Instant::now()));
                 self.pending_send = None;
@@ -2199,7 +2445,7 @@ impl App for EmailApp {
                                     if ui.button(RichText::new("⚡ Send Now").size(11.5)).clicked() {
                                         let _ = self.cmd_tx.send(SyncCommand::SendEmail {
                                             draft: pending.draft,
-                                            password: pending.password,
+                                            password: None,
                                         });
                                         self.status_toast = Some(("Email sent!".to_string(), std::time::Instant::now()));
                                         self.pending_send = None;
@@ -2237,9 +2483,9 @@ impl App for EmailApp {
         // Continuous redraw when syncing or periodic heartbeat to guarantee Wayland compositor
         // ping/pong responses and prevent window manager ANR timeouts
         if self.is_syncing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
 }

@@ -97,6 +97,20 @@ impl CredentialStore for NativeKeyringStore {
                     Ok(secret)
                 }
                 Err(keyring::Error::NoEntry) => {
+                    // Try fallback legacy service names
+                    let fallback_services = ["com.rustmail.emailapp", "AT-mail-rs-credential-store"];
+                    for svc in fallback_services {
+                        if svc != self.service_name {
+                            if let Ok(legacy_entry) = Entry::new(svc, key) {
+                                if let Ok(secret) = legacy_entry.get_password() {
+                                    if let Ok(mut cache) = self.fallback_cache.write() {
+                                        cache.insert(key.to_string(), secret.clone());
+                                    }
+                                    return Ok(secret);
+                                }
+                            }
+                        }
+                    }
                     Err(EmailError::Keyring(format!(
                         "No credential found for key: {}",
                         key

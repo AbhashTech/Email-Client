@@ -171,6 +171,8 @@ CREATE INDEX IF NOT EXISTS idx_drafts_account ON drafts(account_id, updated_at D
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_emails(send_at_timestamp ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_snooze ON messages(snooze_until);
 CREATE INDEX IF NOT EXISTS idx_outbox_retry ON outbox(next_retry_timestamp ASC);
+CREATE INDEX IF NOT EXISTS idx_messages_folder_unread ON messages(folder_id, is_deleted, is_read);
+CREATE INDEX IF NOT EXISTS idx_messages_thread_lookup ON messages(account_id, message_id, in_reply_to);
 
 -- FTS5 Full-Text Search Virtual Table
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

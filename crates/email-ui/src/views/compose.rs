@@ -268,7 +268,7 @@ impl ComposeView {
         signatures: &[Signature],
         keyring: &Arc<dyn CredentialStore>,
         storage: &Storage,
-        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
+        on_schedule_send: &mut Option<OutgoingDraft>,
         on_data_changed: &mut bool,
         status_toast: &mut Option<(String, std::time::Instant)>,
     ) {
@@ -842,28 +842,24 @@ impl ComposeView {
         &mut self,
         accounts: &[Account],
         signatures: &[Signature],
-        keyring: &Arc<dyn CredentialStore>,
-        on_schedule_send: &mut Option<(OutgoingDraft, String)>,
+        _keyring: &Arc<dyn CredentialStore>,
+        on_schedule_send: &mut Option<OutgoingDraft>,
         storage: &Storage,
     ) -> bool {
         match self.build_outgoing_draft(signatures, accounts, storage) {
             Ok(draft) => {
                 let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
-                if let Some(acc) = current_account {
-                    match keyring.get_credential(&acc.credential_key) {
-                        Ok(pwd) => {
-                            if let Some(ref did) = self.draft_id {
-                                let _ = storage.delete_draft(did);
-                            }
-                            *on_schedule_send = Some((draft, pwd));
-                            self.is_open = false;
-                            true
-                        }
-                        Err(e) => {
-                            self.error_msg = Some(format!("Could not retrieve account credentials: {}", e));
-                            false
-                        }
+                if current_account.is_some() {
+                    if let Some(ref did) = self.draft_id {
+                        let storage_clone = storage.clone();
+                        let did_clone = did.clone();
+                        std::thread::spawn(move || {
+                            let _ = storage_clone.delete_draft(&did_clone);
+                        });
                     }
+                    *on_schedule_send = Some(draft);
+                    self.is_open = false;
+                    true
                 } else {
                     self.error_msg = Some("Account not found.".to_string());
                     false
@@ -889,14 +885,14 @@ impl ComposeView {
                 let current_account = accounts.iter().find(|a| a.id == self.selected_account_id);
                 if let Some(acc) = current_account {
                     let scheduled = ScheduledEmail::new(acc.id.clone(), draft, target_timestamp);
-                    if let Err(e) = storage.save_scheduled_email(&scheduled) {
-                        self.error_msg = Some(format!("Failed to schedule email: {}", e));
-                        return false;
-                    }
-
-                    if let Some(ref did) = self.draft_id {
-                        let _ = storage.delete_draft(did);
-                    }
+                    let storage_clone = storage.clone();
+                    let did_opt = self.draft_id.clone();
+                    std::thread::spawn(move || {
+                        let _ = storage_clone.save_scheduled_email(&scheduled);
+                        if let Some(ref did) = did_opt {
+                            let _ = storage_clone.delete_draft(did);
+                        }
+                    });
 
                     self.is_open = false;
                     true

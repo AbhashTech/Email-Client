@@ -353,7 +353,11 @@ impl SyncWorker {
 
             SyncCommand::SendEmail { draft, password } => {
                 let account = storage.get_account(&draft.account_id)?;
-                SmtpClient::send_email(&account, &password, &draft).await?;
+                let pwd = match password {
+                    Some(p) => p,
+                    None => keyring.get_credential(&account.credential_key)?,
+                };
+                SmtpClient::send_email(&account, &pwd, &draft).await?;
                 let _ = event_tx.send(SyncEvent::EmailSent {
                     subject: draft.subject,
                 });
