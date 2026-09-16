@@ -1161,8 +1161,6 @@ impl EmailApp {
 
 impl App for EmailApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Ensure Wayland window title is committed so compositor never reports "(unknown)"
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title("AT-mail-rs".to_string()));
         self.poll_background_events(ctx);
 
         // Bug Fix: Graceful quit — let eframe close the window cleanly instead of
