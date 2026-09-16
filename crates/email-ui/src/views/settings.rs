@@ -22,6 +22,7 @@ pub enum SettingsTab {
     Appearance,
     SecurityPgp,
     General,
+    Keybindings,
     Backup,
 }
 
@@ -177,6 +178,7 @@ impl SettingsView {
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Appearance, "🎨 Appearance");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::SecurityPgp, "🔒 Security (PGP)");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::General, "⚙ General & Storage");
+                    Self::tab_button(ui, &mut self.active_tab, SettingsTab::Keybindings, "⌨ Keybindings");
                     Self::tab_button(ui, &mut self.active_tab, SettingsTab::Backup, "💾 Backup & Restore");
                 });
 
@@ -227,6 +229,9 @@ impl SettingsView {
                         }
                         SettingsTab::General => {
                             self.show_general_tab(ui, accounts, storage);
+                        }
+                        SettingsTab::Keybindings => {
+                            self.show_keybindings_tab(ui);
                         }
                         SettingsTab::Backup => {
                             self.show_backup_tab(ui, accounts, templates, signatures, storage, on_data_changed);
@@ -1172,6 +1177,39 @@ impl SettingsView {
                 }
             });
     }
+    fn show_keybindings_tab(&mut self, ui: &mut Ui) {
+        ui.heading(RichText::new("Keyboard Shortcuts").size(16.0).color(AppTheme::text_primary(ui)));
+        ui.add_space(10.0);
+
+        let mut cfg = load_app_config();
+        let mut changed = false;
+
+        let mut bind_row = |ui: &mut Ui, label: &str, bind: &mut String| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(label).size(13.0).color(AppTheme::text_secondary(ui)));
+                if ui.text_edit_singleline(bind).changed() {
+                    changed = true;
+                }
+            });
+            ui.add_space(4.0);
+        };
+
+        bind_row(ui, "Compose:", &mut cfg.keybindings.compose);
+        bind_row(ui, "Reply:", &mut cfg.keybindings.reply);
+        bind_row(ui, "Reply All:", &mut cfg.keybindings.reply_all);
+        bind_row(ui, "Forward:", &mut cfg.keybindings.forward);
+        bind_row(ui, "Toggle Star:", &mut cfg.keybindings.toggle_star);
+        bind_row(ui, "Toggle Read:", &mut cfg.keybindings.toggle_read);
+        bind_row(ui, "Move to Folder:", &mut cfg.keybindings.move_to_folder);
+        bind_row(ui, "Next Email:", &mut cfg.keybindings.next_email);
+        bind_row(ui, "Previous Email:", &mut cfg.keybindings.prev_email);
+        bind_row(ui, "Focus Search:", &mut cfg.keybindings.focus_search);
+
+        if changed {
+            let _ = save_app_config(&cfg);
+        }
+    }
+
 
     fn show_backup_tab(
         &mut self,

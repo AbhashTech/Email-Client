@@ -131,6 +131,37 @@ impl Default for CloseButtonAction {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyBindings {
+    pub compose: String,
+    pub reply: String,
+    pub reply_all: String,
+    pub forward: String,
+    pub toggle_star: String,
+    pub toggle_read: String,
+    pub move_to_folder: String,
+    pub next_email: String,
+    pub prev_email: String,
+    pub focus_search: String,
+}
+
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self {
+            compose: "c".to_string(),
+            reply: "r".to_string(),
+            reply_all: "a".to_string(),
+            forward: "f".to_string(),
+            toggle_star: "s".to_string(),
+            toggle_read: "u".to_string(),
+            move_to_folder: "m".to_string(),
+            next_email: "j".to_string(),
+            prev_email: "k".to_string(),
+            focus_search: "/".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub custom_data_dir: Option<String>,
@@ -140,6 +171,8 @@ pub struct AppConfig {
     /// Auto-sync interval in seconds. 0 = disabled. Default = 300 (5 minutes).
     #[serde(default = "default_auto_sync_interval")]
     pub auto_sync_interval_secs: u64,
+    #[serde(default)]
+    pub keybindings: KeyBindings,
 }
 
 fn default_auto_sync_interval() -> u64 {

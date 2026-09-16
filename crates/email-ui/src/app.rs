@@ -1089,65 +1089,95 @@ impl App for EmailApp {
             self.command_palette.open();
         }
 
+        fn str_to_key(s: &str) -> Option<egui::Key> {
+            match s.to_lowercase().as_str() {
+                "a" => Some(egui::Key::A), "b" => Some(egui::Key::B), "c" => Some(egui::Key::C),
+                "d" => Some(egui::Key::D), "e" => Some(egui::Key::E), "f" => Some(egui::Key::F),
+                "g" => Some(egui::Key::G), "h" => Some(egui::Key::H), "i" => Some(egui::Key::I),
+                "j" => Some(egui::Key::J), "k" => Some(egui::Key::K), "l" => Some(egui::Key::L),
+                "m" => Some(egui::Key::M), "n" => Some(egui::Key::N), "o" => Some(egui::Key::O),
+                "p" => Some(egui::Key::P), "q" => Some(egui::Key::Q), "r" => Some(egui::Key::R),
+                "s" => Some(egui::Key::S), "t" => Some(egui::Key::T), "u" => Some(egui::Key::U),
+                "v" => Some(egui::Key::V), "w" => Some(egui::Key::W), "x" => Some(egui::Key::X),
+                "y" => Some(egui::Key::Y), "z" => Some(egui::Key::Z),
+                "/" => Some(egui::Key::Slash),
+                _ => None,
+            }
+        }
+
         // Enhancement 2: Global keyboard shortcuts (only when no text field is focused)
         // These match the shortcuts listed in the Command Palette.
         if !ctx.wants_keyboard_input() {
-            // c → Compose new email
-            if ctx.input(|i| i.key_pressed(egui::Key::C)) {
-                self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+            let kb = crate::load_app_config().keybindings;
+            
+            if let Some(k) = str_to_key(&kb.compose) {
+                if ctx.input(|i| i.key_pressed(k)) {
+                    self.compose_view.open_new(self.accounts.first().map(|a| a.id.as_str()), &self.signatures);
+                }
             }
-            // / → Focus search
-            if ctx.input(|i| i.key_pressed(egui::Key::Slash)) {
-                self.focus_search_requested = true;
+            if let Some(k) = str_to_key(&kb.focus_search) {
+                if ctx.input(|i| i.key_pressed(k)) {
+                    self.focus_search_requested = true;
+                }
             }
 
             if self.selected_message_id.is_some() {
-                // r → Reply
-                if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-                    if let Some(ref detail) = self.selected_message_detail {
-                        let quote = detail.body_plain.clone().unwrap_or_default();
-                        self.compose_view.open_reply(
-                            &detail.header.account_id,
-                            &detail.header.from_address,
-                            "",
-                            &detail.header.subject,
-                            detail.header.message_id.clone(),
-                            &quote,
-                            &self.signatures,
-                            true,
-                        );
+                if let Some(k) = str_to_key(&kb.reply) {
+                    if ctx.input(|i| i.key_pressed(k)) {
+                        if let Some(ref detail) = self.selected_message_detail {
+                            let quote = detail.body_plain.clone().unwrap_or_default();
+                            self.compose_view.open_reply(
+                                &detail.header.account_id,
+                                &detail.header.from_address,
+                                "",
+                                &detail.header.subject,
+                                detail.header.message_id.clone(),
+                                &quote,
+                                &self.signatures,
+                                true,
+                            );
+                        }
                     }
                 }
-                // f → Forward
-                if ctx.input(|i| i.key_pressed(egui::Key::F)) {
-                    if let Some(ref detail) = self.selected_message_detail {
-                        let quote = detail.body_plain.clone().unwrap_or_default();
-                        let subj = format!("Fwd: {}", detail.header.subject);
-                        self.compose_view.open_reply(
-                            &detail.header.account_id,
-                            "",
-                            "",
-                            &subj,
-                            None,
-                            &format!("---------- Forwarded message ---------\nFrom: {}\nSubject: {}\n\n{}", detail.header.from_address, detail.header.subject, quote),
-                            &self.signatures,
-                            true,
-                        );
+                
+                if let Some(k) = str_to_key(&kb.forward) {
+                    if ctx.input(|i| i.key_pressed(k)) {
+                        if let Some(ref detail) = self.selected_message_detail {
+                            let quote = detail.body_plain.clone().unwrap_or_default();
+                            let subj = format!("Fwd: {}", detail.header.subject);
+                            self.compose_view.open_reply(
+                                &detail.header.account_id,
+                                "",
+                                "",
+                                &subj,
+                                None,
+                                &format!("---------- Forwarded message ---------\nFrom: {}\nSubject: {}\n\n{}", detail.header.from_address, detail.header.subject, quote),
+                                &self.signatures,
+                                true,
+                            );
+                        }
                     }
                 }
-                // u → Toggle unread
-                if ctx.input(|i| i.key_pressed(egui::Key::U)) {
-                    self.execute_palette_action(PaletteAction::MarkUnread);
+                
+                if let Some(k) = str_to_key(&kb.toggle_read) {
+                    if ctx.input(|i| i.key_pressed(k)) {
+                        self.execute_palette_action(PaletteAction::MarkUnread);
+                    }
                 }
-                // s → Toggle star/flag
-                if ctx.input(|i| i.key_pressed(egui::Key::S)) {
-                    self.execute_palette_action(PaletteAction::ToggleStar);
+                
+                if let Some(k) = str_to_key(&kb.toggle_star) {
+                    if ctx.input(|i| i.key_pressed(k)) {
+                        self.execute_palette_action(PaletteAction::ToggleStar);
+                    }
                 }
-                // m → Move to folder
-                if ctx.input(|i| i.key_pressed(egui::Key::M)) {
-                    self.show_move_modal = true;
+                
+                if let Some(k) = str_to_key(&kb.move_to_folder) {
+                    if ctx.input(|i| i.key_pressed(k)) {
+                        self.show_move_modal = true;
+                    }
                 }
-                // Delete → Delete selected
+                
+                // Delete → Delete selected (hardcoded)
                 if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
                     self.execute_palette_action(PaletteAction::DeleteSelected);
                 }
