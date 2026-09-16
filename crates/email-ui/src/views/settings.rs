@@ -391,7 +391,7 @@ impl SettingsView {
                                 Some(300) => "5 min",
                                 Some(600) => "10 min",
                                 Some(1800) => "30 min",
-                                Some(v) => "Custom",
+                                Some(_v) => "Custom",
                             })
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut current_interval, None, "Use Global");

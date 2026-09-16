@@ -569,25 +569,9 @@ impl EmailApp {
             return;
         }
 
-        let now = std::time::Instant::now();
-        // Since we don't have a persistent per-account last_sync in this App struct,
-        // we'll use last_auto_sync as a base, or we can use last_auto_sync for the fallback.
-        // Wait, if I just sync accounts one by one:
-        
-        let mut any_synced = false;
-        
-        for account in &self.accounts {
-            // In a real app we'd track last sync per account, but to keep it simple here,
-            // we'll just check if the global timer exceeded the account's interval.
-            // Wait, last_auto_sync is a single Instant.
-            // I'll update EmailApp to have last_auto_sync be per account? No, I'll just
-            // use a crude approach where I check if last_auto_sync elapsed for the account's interval.
-            // Actually, we can just use last_auto_sync to check the minimum interval.
-            
-            // To do this properly without changing App struct too much:
-        }
-        
-        // Actually, let's just do:
+
+        // Use the minimum interval across all accounts to determine the tick rate,
+        // then sync each account that has its own interval configured.
         let mut min_interval = global_interval_secs;
         for acc in &self.accounts {
             if let Some(i) = acc.sync_interval_secs {
