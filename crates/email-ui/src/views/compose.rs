@@ -41,6 +41,7 @@ pub struct ComposeView {
     pub show_quoted_text: bool,
     pub include_quote: bool,
     pub show_signature_card: bool,
+    pub known_contacts: Vec<String>,
 }
 
 fn find_default_signature<'a>(signatures: &'a [Signature], account_id: Option<&str>) -> Option<&'a Signature> {
@@ -97,6 +98,7 @@ impl ComposeView {
             show_quoted_text: true,
             include_quote: true,
             show_signature_card: true,
+            known_contacts: Vec::new(),
         }
     }
 
@@ -272,6 +274,18 @@ impl ComposeView {
     ) {
         if !self.is_open {
             return;
+        }
+
+        if self.known_contacts.is_empty() {
+            if let Ok(contacts) = storage.get_known_contacts(100) {
+                self.known_contacts = contacts.into_iter().map(|(name, addr)| {
+                    if let Some(n) = name {
+                        format!("{} <{}>", n, addr)
+                    } else {
+                        addr
+                    }
+                }).collect();
+            }
         }
 
         let mut is_open = self.is_open;
@@ -470,15 +484,46 @@ impl ComposeView {
                         ui.add_space(4.0);
 
                         // 3. To, Cc, Bcc
+                        // 3. To, Cc, Bcc
+                        let mut to_response = None;
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("To:").size(12.5).color(AppTheme::text_muted(ui)));
-                            ui.add(egui::TextEdit::singleline(&mut self.to_input).desired_width(ui.available_width() - 80.0));
+                            to_response = Some(ui.add(egui::TextEdit::singleline(&mut self.to_input).desired_width(ui.available_width() - 80.0)));
                             if ui.button(if self.show_cc_bcc { "Hide Cc" } else { "Cc/Bcc" }).clicked() { self.show_cc_bcc = !self.show_cc_bcc; }
                         });
+                        
+                        let mut cc_response = None;
                         if self.show_cc_bcc {
-                            ui.horizontal(|ui| { ui.label("Cc:"); ui.text_edit_singleline(&mut self.cc_input); });
+                            ui.horizontal(|ui| { ui.label("Cc:"); cc_response = Some(ui.add(egui::TextEdit::singleline(&mut self.cc_input))); });
                             ui.horizontal(|ui| { ui.label("Bcc:"); ui.text_edit_singleline(&mut self.bcc_input); });
                         }
+
+                        let show_autocomplete = |ui: &mut egui::Ui, input: &mut String, response: &egui::Response, contacts: &[String]| {
+                            if response.has_focus() && !input.is_empty() {
+                                let last_term = input.split(',').last().unwrap_or("").trim().to_lowercase();
+                                if last_term.len() >= 2 {
+                                    let matches: Vec<_> = contacts.iter().filter(|c| c.to_lowercase().contains(&last_term)).take(6).collect();
+                                    if !matches.is_empty() {
+                                        egui::popup::popup_below_widget(ui, response.id, &response, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                                            for m in matches {
+                                                if ui.selectable_label(false, m).clicked() {
+                                                    let mut parts: Vec<&str> = input.split(',').collect();
+                                                    parts.pop(); // remove last
+                                                    let mut new_val = parts.join(",");
+                                                    if !new_val.is_empty() && !new_val.ends_with(' ') { new_val.push_str(", "); }
+                                                    if new_val.is_empty() { new_val.push_str(m); } else { new_val.push_str(m); }
+                                                    new_val.push_str(", ");
+                                                    *input = new_val;
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        };
+
+                        if let Some(r) = to_response { show_autocomplete(ui, &mut self.to_input, &r, &self.known_contacts); }
+                        if let Some(r) = cc_response { show_autocomplete(ui, &mut self.cc_input, &r, &self.known_contacts); }
                         ui.add_space(4.0);
                         ui.horizontal(|ui| { ui.label("Subject:"); ui.text_edit_singleline(&mut self.subject); });
 
