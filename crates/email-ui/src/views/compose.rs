@@ -575,12 +575,14 @@ impl ComposeView {
                                 egui::TextEdit::multiline(&mut self.body_plain)
                                     .desired_width(f32::INFINITY)
                                     .min_size(egui::vec2(0.0, editor_min_h))
+                                    .lock_focus(true)
                             );
                         } else {
                             ui.add(
                                 egui::TextEdit::multiline(&mut self.body_plain)
                                     .desired_width(f32::INFINITY)
                                     .min_size(egui::vec2(0.0, editor_min_h))
+                                    .lock_focus(true)
                             );
                         }
 

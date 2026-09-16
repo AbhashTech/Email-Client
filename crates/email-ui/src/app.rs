@@ -60,6 +60,7 @@ pub struct EmailApp {
     scheduled_count: usize,
     outbox_count: usize,
     show_scheduled_modal: bool,
+    show_move_modal: bool,
     last_applied_system_theme: Option<egui::Theme>,
 
     // Bug Fix: graceful quit flag (replaces std::process::exit)
@@ -154,6 +155,7 @@ impl EmailApp {
             scheduled_count: 0,
             outbox_count: 0,
             show_scheduled_modal: false,
+            show_move_modal: false,
             last_applied_system_theme: None,
             should_quit: false,
             shutdown,
@@ -1141,6 +1143,10 @@ impl App for EmailApp {
                 if ctx.input(|i| i.key_pressed(egui::Key::S)) {
                     self.execute_palette_action(PaletteAction::ToggleStar);
                 }
+                // m → Move to folder
+                if ctx.input(|i| i.key_pressed(egui::Key::M)) {
+                    self.show_move_modal = true;
+                }
                 // Delete → Delete selected
                 if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
                     self.execute_palette_action(PaletteAction::DeleteSelected);
@@ -1946,6 +1952,41 @@ impl App for EmailApp {
                     }
                 });
             self.show_scheduled_modal = modal_open;
+        }
+
+        // Move to Folder Modal
+        if self.show_move_modal {
+            let mut modal_open = self.show_move_modal;
+            egui::Window::new("📂 Move to Folder")
+                .open(&mut modal_open)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    if let Some(ref detail) = self.selected_message_detail {
+                        let account_id = &detail.header.account_id;
+                        if let Some(folders) = self.folders_by_account.get(account_id) {
+                            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                                for folder in folders {
+                                    if ui.selectable_label(false, &folder.display_name).clicked() {
+                                        let _ = self.cmd_tx.send(SyncCommand::MoveMessage {
+                                            account_id: account_id.clone(),
+                                            source_folder_id: detail.header.folder_id.clone(),
+                                            target_folder_id: folder.id.clone(),
+                                            message_id: detail.header.message_id.clone().unwrap_or_default(),
+                                            uid: detail.header.uid,
+                                        });
+                                        self.show_move_modal = false;
+                                        break;
+                                    }
+                                }
+                            });
+                        } else {
+                            ui.label("No folders found for this account.");
+                        }
+                    } else {
+                        ui.label("No message selected.");
+                    }
+                });
+            self.show_move_modal = modal_open;
         }
 
         let mut on_add_account_from_settings = false;
