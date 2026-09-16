@@ -59,6 +59,10 @@ fn main() -> Result<(), eframe::Error> {
     // Enter Tokio runtime context for the main UI thread
     let _guard = rt.enter();
 
+    // Shared cancellation token — cancelled by the UI on quit so all
+    // background tasks (especially IMAP IDLE) exit promptly.
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+
     // Spawn the background SyncWorker actor on the Tokio runtime
     let worker_storage = storage.clone();
     let worker_keyring = keyring.clone();
@@ -73,7 +77,7 @@ fn main() -> Result<(), eframe::Error> {
     let idle_storage = storage.clone();
     let idle_keyring = keyring.clone();
     let idle_event_tx = event_tx.clone();
-    email_sync::IdleWorker::start_for_all_accounts(idle_storage, idle_keyring, idle_event_tx);
+    email_sync::IdleWorker::start_for_all_accounts(idle_storage, idle_keyring, idle_event_tx, shutdown_token.clone());
 
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -85,6 +89,7 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     let app_rt_handle = rt_handle.clone();
+    let app_shutdown = shutdown_token.clone();
     eframe::run_native(
         "AT-mail-rs",
         options,
@@ -98,11 +103,17 @@ fn main() -> Result<(), eframe::Error> {
             // Apply clean modern dark theme
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
             Ok(Box::new(EmailApp::new(
-                cc, storage, keyring, cmd_tx, event_rx, app_rt_handle,
+                cc, storage, keyring, cmd_tx, event_rx, app_rt_handle, app_shutdown,
             )))
         }),
+    )?;
 
-    )
+    // eframe has returned — the window is closed. Cancel all background tasks
+    // and give them 3 seconds to finish cleanly before we exit.
+    shutdown_token.cancel();
+    rt.shutdown_timeout(std::time::Duration::from_secs(3));
+
+    Ok(())
 }
 
 

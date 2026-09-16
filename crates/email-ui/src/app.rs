@@ -11,6 +11,7 @@ use log::error;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct PendingSend {
@@ -63,6 +64,9 @@ pub struct EmailApp {
 
     // Bug Fix: graceful quit flag (replaces std::process::exit)
     should_quit: bool,
+    // Cancellation token shared with background tasks — cancelled on quit
+    // so IMAP IDLE loops exit promptly instead of blocking the runtime drop.
+    shutdown: CancellationToken,
 
     // Enhancement 1: Auto-sync timer
     last_auto_sync: std::time::Instant,
@@ -88,6 +92,7 @@ impl EmailApp {
         cmd_tx: mpsc::UnboundedSender<SyncCommand>,
         event_rx: broadcast::Receiver<SyncEvent>,
         rt_handle: tokio::runtime::Handle,
+        shutdown: CancellationToken,
     ) -> Self {
         let mut current_theme = crate::theme::ThemePreset::DarkSlate;
         let mut active_custom_theme_id = None;
@@ -151,6 +156,7 @@ impl EmailApp {
             show_scheduled_modal: false,
             last_applied_system_theme: None,
             should_quit: false,
+            shutdown,
             last_auto_sync: std::time::Instant::now(),
             cached_mem_rss: "–".to_string(),
             last_mem_refresh: std::time::Instant::now()
@@ -346,6 +352,7 @@ impl EmailApp {
                         let _ = self.cmd_tx.send(SyncCommand::SyncAll);
                     }
                     crate::tray::TrayAction::Quit => {
+                        self.shutdown.cancel();
                         self.should_quit = true;
                     }
                 }
@@ -499,6 +506,8 @@ impl EmailApp {
                 // Set the graceful quit flag — eframe will call ViewportCommand::Close
                 // from the update() loop, allowing Rust drop chains and Tokio to shut
                 // down cleanly (no "wait or terminate" dialog on Linux compositors).
+                // Also cancel the shared token so IMAP IDLE tasks exit promptly.
+                self.shutdown.cancel();
                 self.should_quit = true;
             }
         }

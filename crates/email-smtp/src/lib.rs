@@ -8,6 +8,14 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use log::info;
 use std::time::Duration;
 
+use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
+
+fn get_transport_pool() -> &'static Mutex<HashMap<String, AsyncSmtpTransport<Tokio1Executor>>> {
+    static POOL: OnceLock<Mutex<HashMap<String, AsyncSmtpTransport<Tokio1Executor>>>> = OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub struct SmtpClient;
 
 impl SmtpClient {
@@ -146,30 +154,43 @@ impl SmtpClient {
                 .map_err(|e| EmailError::Smtp(format!("Failed to build plain email: {}", e)))?
         };
 
-        let creds = Credentials::new(account.email.clone(), password.to_string());
+        let cache_key = format!("{}@{}:{}", account.email, account.smtp_host, account.smtp_port);
+        let pool_mutex = get_transport_pool();
+        
+        let transport = {
+            let mut map = pool_mutex.lock().unwrap();
+            if let Some(t) = map.get(&cache_key) {
+                t.clone()
+            } else {
+                let creds = Credentials::new(account.email.clone(), password.to_string());
+                let transport_builder = match account.smtp_security {
+                    SecurityType::Tls => {
+                        AsyncSmtpTransport::<Tokio1Executor>::relay(&account.smtp_host)
+                            .map_err(|e| EmailError::Smtp(format!("Invalid SMTP host: {}", e)))?
+                            .port(account.smtp_port)
+                    }
+                    SecurityType::StartTls => {
+                        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&account.smtp_host)
+                            .map_err(|e| EmailError::Smtp(format!("Invalid SMTP host: {}", e)))?
+                            .port(account.smtp_port)
+                    }
+                    SecurityType::Plain => {
+                        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&account.smtp_host)
+                            .port(account.smtp_port)
+                            .tls(Tls::None)
+                    }
+                };
 
-        let transport_builder = match account.smtp_security {
-            SecurityType::Tls => {
-                AsyncSmtpTransport::<Tokio1Executor>::relay(&account.smtp_host)
-                    .map_err(|e| EmailError::Smtp(format!("Invalid SMTP host: {}", e)))?
-                    .port(account.smtp_port)
-            }
-            SecurityType::StartTls => {
-                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&account.smtp_host)
-                    .map_err(|e| EmailError::Smtp(format!("Invalid SMTP host: {}", e)))?
-                    .port(account.smtp_port)
-            }
-            SecurityType::Plain => {
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&account.smtp_host)
-                    .port(account.smtp_port)
-                    .tls(Tls::None)
+                let t: AsyncSmtpTransport<Tokio1Executor> = transport_builder
+                    .credentials(creds)
+                    .timeout(Some(Duration::from_secs(15)))
+                    .pool_config(lettre::transport::smtp::PoolConfig::new().max_size(5))
+                    .build();
+                
+                map.insert(cache_key.clone(), t.clone());
+                t
             }
         };
-
-        let transport: AsyncSmtpTransport<Tokio1Executor> = transport_builder
-            .credentials(creds)
-            .timeout(Some(Duration::from_secs(15)))
-            .build();
 
         transport
             .send(email)
