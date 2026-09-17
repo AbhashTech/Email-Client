@@ -45,12 +45,11 @@ fn main() -> Result<(), eframe::Error> {
 
     // Channels for Tokio background sync worker <-> egui UI thread
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SyncCommand>();
-    let (event_tx, event_rx) = broadcast::channel::<SyncEvent>(256);
+    let (event_tx, event_rx) = broadcast::channel::<SyncEvent>(1024);
 
     // Initialize multi-threaded Tokio runtime
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(4)
         .build()
         .expect("Failed to create Tokio runtime");
 
@@ -97,6 +96,7 @@ fn main() -> Result<(), eframe::Error> {
             .with_inner_size([1200.0, 780.0])
             .with_min_inner_size([880.0, 540.0])
             .with_transparent(false),
+        vsync: false,
         ..Default::default()
     };
 

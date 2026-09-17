@@ -7,7 +7,7 @@ use email_core::events::{SyncCommand, SyncEvent};
 use email_core::models::{Account, Folder, MessageDetail, MessageHeader, OutgoingDraft, Signature, Template};
 use email_keychain::CredentialStore;
 use email_storage::Storage;
-use log::error;
+use log::{error, warn};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
@@ -210,20 +210,26 @@ impl EmailApp {
             let _ = app.cmd_tx.send(SyncCommand::SyncAll);
         }
 
-        // Wakes the reactive egui event loop whenever background sync events occur
+        // Wakes the reactive egui event loop whenever background sync events occur.
+        // Handles RecvError::Lagged gracefully so bursts never terminate the background waker.
         let mut bcast_rx = app.event_rx.resubscribe();
         let egui_ctx_events = cc.egui_ctx.clone();
         app.rt_handle.spawn(async move {
-            while let Ok(_) = bcast_rx.recv().await {
-                egui_ctx_events.request_repaint();
+            loop {
+                match bcast_rx.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        egui_ctx_events.request_repaint();
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         });
 
-        // Gentle 5s tick for queue processing and auto-sync checks (replaces continuous frame polling)
+        // Gentle 3s background timer for queue processing and auto-sync checks
         let egui_ctx_timer = cc.egui_ctx.clone();
         let shutdown_timer = shutdown.clone();
         app.rt_handle.spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -486,7 +492,16 @@ impl EmailApp {
         }
 
         // Poll Sync Events
-        while let Ok(event) = self.event_rx.try_recv() {
+        loop {
+            let event = match self.event_rx.try_recv() {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                    warn!("Sync event receiver lagged by {} events", n);
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+            };
             match event {
                 SyncEvent::SyncStatusChanged {
                     is_syncing,
@@ -2502,6 +2517,11 @@ impl App for EmailApp {
                 let remaining = std::time::Duration::from_secs(6).saturating_sub(instant.elapsed());
                 ctx.request_repaint_after(remaining);
             }
+        }
+
+        // Animate sync spinner when actively syncing; otherwise rely on reactive event-driven repainting
+        if self.is_syncing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
     }
 }
